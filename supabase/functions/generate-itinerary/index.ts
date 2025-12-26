@@ -175,7 +175,8 @@ Create exactly 3 diverse options. Option ${trip.pace === 'relaxed' ? '1' : '3'} 
       await supabase.from('trips').update({ status: 'failed' }).eq('id', tripId);
     } catch {}
 
-    return new Response(JSON.stringify({ error: error.message }), {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
