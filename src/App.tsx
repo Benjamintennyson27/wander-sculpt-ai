@@ -13,6 +13,11 @@ import TripDetail from "./pages/TripDetail";
 import Terms from "./pages/Terms";
 import NotFound from "./pages/NotFound";
 
+// Development-only debug page
+const DebugRLS = import.meta.env.DEV
+  ? await import("./pages/DebugRLS").then((m) => m.default)
+  : () => null;
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -41,6 +46,10 @@ const App = () => (
                 <TripDetail />
               </ProtectedRoute>
             } />
+            {/* Development-only debug route */}
+            {import.meta.env.DEV && (
+              <Route path="/debug-rls" element={<DebugRLS />} />
+            )}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
