@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -16,6 +16,7 @@ import {
 import { format } from 'date-fns';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import TermsAcceptanceModal from '@/components/TermsAcceptanceModal';
 
 const INTERESTS = [
   { id: 'nature', label: 'Nature & Wildlife', icon: '🌿' },
@@ -59,12 +60,16 @@ const STEPS = [
   { id: 'destination', title: 'Destination', icon: MapPin },
 ];
 
+const CURRENT_TERMS_VERSION = '1.0';
+
 export default function NewTrip() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState<boolean | null>(null);
   
   const [formData, setFormData] = useState<TripFormData>({
     isFamily: false,
@@ -101,6 +106,21 @@ export default function NewTrip() {
     }));
   };
 
+  // Check if user has accepted terms
+  useEffect(() => {
+    const checkTerms = async () => {
+      if (!user) return;
+      const { data } = await supabase
+        .from('terms_acceptance')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('version', CURRENT_TERMS_VERSION)
+        .maybeSingle();
+      setTermsAccepted(!!data);
+    };
+    checkTerms();
+  }, [user]);
+
   const canProceed = () => {
     switch (currentStep) {
       case 0: return true;
@@ -114,6 +134,18 @@ export default function NewTrip() {
   };
 
   const handleSubmit = async () => {
+    if (!user) return;
+    
+    // Check terms first
+    if (!termsAccepted) {
+      setShowTermsModal(true);
+      return;
+    }
+    
+    await createTripAndGenerate();
+  };
+
+  const createTripAndGenerate = async () => {
     if (!user) return;
     
     setLoading(true);
@@ -143,11 +175,25 @@ export default function NewTrip() {
       if (error) throw error;
 
       // Trigger itinerary generation
-      const { error: genError } = await supabase.functions.invoke('generate-itinerary', {
+      const { data: genData, error: genError } = await supabase.functions.invoke('generate-itinerary', {
         body: { tripId: trip.id }
       });
 
+      // Handle TERMS_REQUIRED error
       if (genError) {
+        const errorBody = genData || {};
+        if (errorBody.error === 'TERMS_REQUIRED') {
+          setShowTermsModal(true);
+          return;
+        }
+        if (errorBody.error === 'RATE_LIMIT_EXCEEDED') {
+          toast({
+            variant: 'destructive',
+            title: 'Rate limit reached',
+            description: errorBody.message || 'Please try again later.'
+          });
+          return;
+        }
         console.error('Generation error:', genError);
         toast({
           variant: 'destructive',
@@ -167,6 +213,13 @@ export default function NewTrip() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleTermsAccepted = () => {
+    setTermsAccepted(true);
+    setShowTermsModal(false);
+    // Continue with trip creation
+    createTripAndGenerate();
   };
 
   const renderStep = () => {
@@ -573,6 +626,13 @@ export default function NewTrip() {
           )}
         </div>
       </main>
+
+      {/* Terms Acceptance Modal */}
+      <TermsAcceptanceModal
+        open={showTermsModal}
+        onAccept={handleTermsAccepted}
+        onCancel={() => setShowTermsModal(false)}
+      />
     </div>
   );
 }
