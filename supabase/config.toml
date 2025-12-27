@@ -1,1 +1,7 @@
 project_id = "amknwlwjeamvsahshlhm"
+
+[functions.generate-itinerary]
+verify_jwt = false
+
+[functions.trip-flow]
+verify_jwt = false

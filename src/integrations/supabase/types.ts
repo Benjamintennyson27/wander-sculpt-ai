@@ -16,39 +16,51 @@ export type Database = {
     Tables: {
       itineraries: {
         Row: {
+          cons: string[] | null
           created_at: string
           days: Json
           disclaimers: Json | null
           general_tips: Json | null
           id: string
           is_best_option: boolean | null
+          model_used: string | null
           option_index: number
+          pros: string[] | null
+          score: number | null
           summary: string | null
           title: string
           trip_id: string
           why_good_for_you: string | null
         }
         Insert: {
+          cons?: string[] | null
           created_at?: string
           days?: Json
           disclaimers?: Json | null
           general_tips?: Json | null
           id?: string
           is_best_option?: boolean | null
+          model_used?: string | null
           option_index: number
+          pros?: string[] | null
+          score?: number | null
           summary?: string | null
           title: string
           trip_id: string
           why_good_for_you?: string | null
         }
         Update: {
+          cons?: string[] | null
           created_at?: string
           days?: Json
           disclaimers?: Json | null
           general_tips?: Json | null
           id?: string
           is_best_option?: boolean | null
+          model_used?: string | null
           option_index?: number
+          pros?: string[] | null
+          score?: number | null
           summary?: string | null
           title?: string
           trip_id?: string
@@ -144,22 +156,49 @@ export type Database = {
       }
       terms_acceptance: {
         Row: {
+          accepted: boolean | null
           accepted_at: string
           id: string
           user_id: string
           version: string
         }
         Insert: {
+          accepted?: boolean | null
           accepted_at?: string
           id?: string
           user_id: string
           version?: string
         }
         Update: {
+          accepted?: boolean | null
           accepted_at?: string
           id?: string
           user_id?: string
           version?: string
+        }
+        Relationships: []
+      }
+      trip_answers: {
+        Row: {
+          answer_json: Json
+          created_at: string
+          id: string
+          question_key: string
+          trip_id: string
+        }
+        Insert: {
+          answer_json: Json
+          created_at?: string
+          id?: string
+          question_key: string
+          trip_id: string
+        }
+        Update: {
+          answer_json?: Json
+          created_at?: string
+          id?: string
+          question_key?: string
+          trip_id?: string
         }
         Relationships: []
       }
@@ -197,61 +236,79 @@ export type Database = {
       }
       trips: {
         Row: {
+          adults_count: number | null
           budget_inr: number
           budget_style: string | null
           created_at: string
           destination: string
           diet: string | null
+          duration_days: number | null
           end_date: string
           food_pref: string | null
           id: string
           interests: Json | null
           is_family: boolean | null
+          kids_count: number | null
+          notes: string | null
           pace: string | null
+          people_count: number | null
           selected_itinerary_id: string | null
           start_date: string
           status: string | null
           stay_preference: string | null
+          travel_style: string | null
           travelers: Json | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          adults_count?: number | null
           budget_inr: number
           budget_style?: string | null
           created_at?: string
           destination: string
           diet?: string | null
+          duration_days?: number | null
           end_date: string
           food_pref?: string | null
           id?: string
           interests?: Json | null
           is_family?: boolean | null
+          kids_count?: number | null
+          notes?: string | null
           pace?: string | null
+          people_count?: number | null
           selected_itinerary_id?: string | null
           start_date: string
           status?: string | null
           stay_preference?: string | null
+          travel_style?: string | null
           travelers?: Json | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          adults_count?: number | null
           budget_inr?: number
           budget_style?: string | null
           created_at?: string
           destination?: string
           diet?: string | null
+          duration_days?: number | null
           end_date?: string
           food_pref?: string | null
           id?: string
           interests?: Json | null
           is_family?: boolean | null
+          kids_count?: number | null
+          notes?: string | null
           pace?: string | null
+          people_count?: number | null
           selected_itinerary_id?: string | null
           start_date?: string
           status?: string | null
           stay_preference?: string | null
+          travel_style?: string | null
           travelers?: Json | null
           updated_at?: string
           user_id?: string
