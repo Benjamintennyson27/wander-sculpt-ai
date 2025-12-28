@@ -99,10 +99,22 @@ export function parseItinerary(raw: any): Itinerary {
 }
 
 function normalizeTimeBlock(block: string): 'morning' | 'afternoon' | 'evening' | 'night' {
-  const normalized = (block || 'morning').toLowerCase();
-  if (['morning', 'afternoon', 'evening', 'night'].includes(normalized)) {
-    return normalized as 'morning' | 'afternoon' | 'evening' | 'night';
+  const normalized = (block || 'morning').toLowerCase().trim();
+  
+  // Map variations to standard time blocks
+  if (normalized.includes('morning') || normalized === 'early_morning') {
+    return 'morning';
   }
+  if (normalized.includes('afternoon') || normalized === 'midday' || normalized === 'lunch') {
+    return 'afternoon';
+  }
+  if (normalized.includes('evening') || normalized === 'dusk' || normalized === 'sunset') {
+    return 'evening';
+  }
+  if (normalized.includes('night') || normalized === 'dinner' || normalized === 'late') {
+    return 'night';
+  }
+  
   return 'morning';
 }
 

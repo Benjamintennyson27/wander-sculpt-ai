@@ -306,7 +306,7 @@ export default function TripDetail() {
                   {itinerary.days.map((day) => {
                     const isExpanded = expandedDays[day.day];
                     const itemsByBlock = groupItemsByTimeBlock(day.items);
-                    const timeBlocks = ['morning', 'afternoon', 'evening'] as const;
+                    const timeBlocks = ['morning', 'afternoon', 'evening', 'night'] as const;
                     
                     return (
                       <div key={day.day} className="glass-card overflow-hidden">
