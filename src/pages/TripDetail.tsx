@@ -2,46 +2,19 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { 
   ArrowLeft, Star, RefreshCw, Check, MapPin, 
   Calendar, Clock, Utensils, Lightbulb, AlertTriangle,
-  Loader2, ChevronDown, ChevronUp
+  Loader2, ChevronDown, ChevronUp, Users
 } from 'lucide-react';
 import { format } from 'date-fns';
-
-interface Day {
-  day: number;
-  morning: string;
-  afternoon: string;
-  evening: string;
-  food: string;
-  notes: string;
-}
-
-interface Itinerary {
-  id: string;
-  option_index: number;
-  title: string;
-  summary: string;
-  why_good_for_you: string;
-  days: Day[];
-  general_tips: string[];
-  disclaimers: string[];
-  is_best_option: boolean;
-}
-
-interface Trip {
-  id: string;
-  destination: string;
-  start_date: string;
-  end_date: string;
-  status: string;
-  budget_inr: number;
-  budget_style: string;
-  selected_itinerary_id: string | null;
-}
+import { 
+  Itinerary, Trip, ItineraryItem,
+  parseItinerary, groupItemsByTimeBlock, getTimeBlockOrder 
+} from '@/lib/itinerary-adapter';
 
 export default function TripDetail() {
   const { id } = useParams<{ id: string }>();
@@ -52,7 +25,7 @@ export default function TripDetail() {
   const [itineraries, setItineraries] = useState<Itinerary[]>([]);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
-  const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
+  const [expandedDays, setExpandedDays] = useState<Record<number, boolean>>({});
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
 
   useEffect(() => {
@@ -74,21 +47,16 @@ export default function TripDetail() {
     ]);
 
     if (!tripResult.error && tripResult.data) {
-      setTrip(tripResult.data);
+      setTrip(tripResult.data as Trip);
     }
     if (!itinerariesResult.error && itinerariesResult.data) {
-      // Parse days from JSON
-      const parsed = itinerariesResult.data.map(it => ({
-        ...it,
-        days: Array.isArray(it.days) ? it.days : [],
-        general_tips: Array.isArray(it.general_tips) ? it.general_tips : [],
-        disclaimers: Array.isArray(it.disclaimers) ? it.disclaimers : []
-      }));
-      setItineraries(parsed as unknown as Itinerary[]);
+      const parsed = itinerariesResult.data.map(parseItinerary);
+      setItineraries(parsed);
       
       // Set selected to best option if none selected
-      const best = parsed.find(it => it.is_best_option);
+      const best = parsed.find(it => it.is_best_option || it.recommended);
       if (best) setSelectedOption(best.option_index);
+      else if (parsed.length > 0) setSelectedOption(parsed[0].option_index);
     }
     setLoading(false);
   };
@@ -125,10 +93,64 @@ export default function TripDetail() {
     fetchTrip();
   };
 
-  const toggleDay = (itineraryId: string, dayIndex: number) => {
-    const key = `${itineraryId}-${dayIndex}`;
-    setExpandedDays(prev => ({ ...prev, [key]: !prev[key] }));
+  const toggleDay = (dayNumber: number) => {
+    setExpandedDays(prev => ({ ...prev, [dayNumber]: !prev[dayNumber] }));
   };
+
+  const renderItemCard = (item: ItineraryItem, index: number) => (
+    <div 
+      key={index} 
+      className="p-3 rounded-lg bg-muted/30 border border-border/50 space-y-2"
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2">
+          {item.food_related && (
+            <Utensils className="w-3.5 h-3.5 text-orange-400" />
+          )}
+          {item.kid_friendly && (
+            <Users className="w-3.5 h-3.5 text-blue-400" />
+          )}
+        </div>
+        {(item.cost_min && item.cost_min > 0) || (item.cost_max && item.cost_max > 0) ? (
+          <span className="text-xs text-muted-foreground">
+            ₹{item.cost_min || 0} - ₹{item.cost_max || 0}
+          </span>
+        ) : null}
+      </div>
+      
+      <h5 className="font-medium">{item.title}</h5>
+      
+      {item.description && (
+        <p className="text-sm text-muted-foreground">{item.description}</p>
+      )}
+      
+      <div className="flex flex-wrap gap-2 text-xs">
+        {item.location_area && (
+          <span className="flex items-center gap-1 text-muted-foreground">
+            <MapPin className="w-3 h-3" /> {item.location_area}
+          </span>
+        )}
+        {item.duration_minutes && item.duration_minutes > 0 && (
+          <span className="flex items-center gap-1 text-muted-foreground">
+            <Clock className="w-3 h-3" /> {item.duration_minutes} min
+          </span>
+        )}
+      </div>
+
+      {item.transit_tip && (
+        <p className="text-xs text-blue-400 bg-blue-500/10 p-2 rounded">
+          🚗 {item.transit_tip}
+        </p>
+      )}
+
+      {item.assumptions && (
+        <p className="text-xs text-yellow-400 bg-yellow-500/10 p-2 rounded flex items-start gap-1">
+          <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+          {item.assumptions}
+        </p>
+      )}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -242,8 +264,8 @@ export default function TripDetail() {
                         : 'bg-secondary hover:bg-secondary/80 text-secondary-foreground'
                     }`}
                   >
-                    {itinerary.is_best_option && <Star className="w-4 h-4 inline mr-1" />}
-                    Option {itinerary.option_index}
+                    {(itinerary.is_best_option || itinerary.recommended) && <Star className="w-4 h-4 inline mr-1" />}
+                    Option {itinerary.option_label}
                   </button>
                 ))}
               </div>
@@ -258,8 +280,8 @@ export default function TripDetail() {
             {itineraries.filter(it => it.option_index === selectedOption).map((itinerary) => (
               <div key={itinerary.id} className="space-y-6 animate-fade-in">
                 {/* Header Card */}
-                <div className={`glass-card p-6 ${itinerary.is_best_option ? 'border-accent/50 glow-accent' : ''}`}>
-                  {itinerary.is_best_option && (
+                <div className={`glass-card p-6 ${itinerary.is_best_option || itinerary.recommended ? 'border-accent/50 glow-accent' : ''}`}>
+                  {(itinerary.is_best_option || itinerary.recommended) && (
                     <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-accent/20 text-accent text-sm font-medium mb-4">
                       <Star className="w-4 h-4" />
                       Best for You
@@ -281,62 +303,60 @@ export default function TripDetail() {
                 {/* Days */}
                 <div className="space-y-3">
                   <h3 className="text-lg font-medium">Day-by-Day Plan</h3>
-                  {itinerary.days.map((day, index) => {
-                    const isExpanded = expandedDays[`${itinerary.id}-${index}`];
+                  {itinerary.days.map((day) => {
+                    const isExpanded = expandedDays[day.day];
+                    const itemsByBlock = groupItemsByTimeBlock(day.items);
+                    const timeBlocks = ['morning', 'afternoon', 'evening'] as const;
+                    
                     return (
-                      <div key={index} className="glass-card overflow-hidden">
+                      <div key={day.day} className="glass-card overflow-hidden">
                         <button
-                          onClick={() => toggleDay(itinerary.id, index)}
+                          onClick={() => toggleDay(day.day)}
                           className="w-full p-4 flex items-center justify-between hover:bg-secondary/30 transition-colors"
                         >
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                               <span className="font-display font-semibold text-primary">{day.day}</span>
                             </div>
-                            <span className="font-medium">Day {day.day}</span>
+                            <div className="text-left">
+                              <span className="font-medium">{day.title}</span>
+                              {day.notes && (
+                                <p className="text-sm text-muted-foreground line-clamp-1">{day.notes}</p>
+                              )}
+                            </div>
                           </div>
                           {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                         </button>
                         
                         {isExpanded && (
                           <div className="px-4 pb-4 space-y-4 animate-slide-up">
-                            <div className="grid gap-4 md:grid-cols-3">
-                              <div className="p-3 rounded-lg bg-secondary/50">
-                                <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
-                                  <Clock className="w-3.5 h-3.5" />
-                                  Morning
+                            {timeBlocks.map((block) => {
+                              const blockItems = itemsByBlock[block] || [];
+                              
+                              return (
+                                <div key={block} className="space-y-2">
+                                  <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                                    <Clock className="w-3.5 h-3.5" />
+                                    <span className="capitalize">{block}</span>
+                                    <Badge variant="outline" className="text-xs ml-auto">
+                                      {blockItems.length} {blockItems.length === 1 ? 'activity' : 'activities'}
+                                    </Badge>
+                                  </div>
+                                  
+                                  {blockItems.length > 0 ? (
+                                    <div className="space-y-2">
+                                      {blockItems
+                                        .sort((a, b) => getTimeBlockOrder(a.time_block) - getTimeBlockOrder(b.time_block))
+                                        .map((item, idx) => renderItemCard(item, idx))}
+                                    </div>
+                                  ) : (
+                                    <div className="p-3 rounded-lg bg-secondary/50 text-center">
+                                      <p className="text-sm text-muted-foreground">Free time</p>
+                                    </div>
+                                  )}
                                 </div>
-                                <p className="text-sm">{day.morning || 'Free time'}</p>
-                              </div>
-                              <div className="p-3 rounded-lg bg-secondary/50">
-                                <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
-                                  <Clock className="w-3.5 h-3.5" />
-                                  Afternoon
-                                </div>
-                                <p className="text-sm">{day.afternoon || 'Free time'}</p>
-                              </div>
-                              <div className="p-3 rounded-lg bg-secondary/50">
-                                <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mb-1">
-                                  <Clock className="w-3.5 h-3.5" />
-                                  Evening
-                                </div>
-                                <p className="text-sm">{day.evening || 'Free time'}</p>
-                              </div>
-                            </div>
-                            
-                            {day.food && (
-                              <div className="p-3 rounded-lg bg-accent/5 border border-accent/20">
-                                <div className="flex items-center gap-2 text-sm font-medium text-accent mb-1">
-                                  <Utensils className="w-3.5 h-3.5" />
-                                  Food Recommendations
-                                </div>
-                                <p className="text-sm">{day.food}</p>
-                              </div>
-                            )}
-                            
-                            {day.notes && (
-                              <p className="text-sm text-muted-foreground italic">{day.notes}</p>
-                            )}
+                              );
+                            })}
                           </div>
                         )}
                       </div>
