@@ -9,8 +9,8 @@ const corsHeaders = {
 const CURRENT_TERMS_VERSION = '1.0';
 const RATE_LIMIT_PER_HOUR = 3;
 const MODEL_USED = 'google/gemini-2.5-flash';
+const MAX_DAY_RETRIES = 2;
 
-// Zod-like validation (simplified for edge function)
 interface TripInput {
   tripId: string;
 }
@@ -26,6 +26,26 @@ interface TripData {
   travel_style?: string;
 }
 
+interface Attraction {
+  name: string;
+  type: string;
+  area: string;
+  reason: string;
+  maps_query: string;
+}
+
+interface FoodSpot {
+  name: string;
+  area: string;
+  cuisine_type: string;
+  maps_query: string;
+}
+
+interface DestinationFacts {
+  attractions: Attraction[];
+  food_spots: FoodSpot[];
+}
+
 interface ItineraryItem {
   time_block: 'morning' | 'afternoon' | 'evening' | 'night';
   title: string;
@@ -38,6 +58,7 @@ interface ItineraryItem {
   food_related?: boolean;
   transit_tip?: string;
   assumptions?: string;
+  maps_query?: string;
 }
 
 interface ItineraryDay {
@@ -79,19 +100,92 @@ function validateInput(data: unknown): TripInput {
   return { tripId: obj.tripId };
 }
 
-function validateAIResponse(data: unknown, retryCount: number): AIResponse {
-  if (!data || typeof data !== 'object') throw new Error('Invalid AI response');
-  const obj = data as Record<string, unknown>;
+function validateDayItems(day: ItineraryDay, isArrivalDay: boolean, isDepartureDay: boolean): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  const items = day.items || [];
   
-  if (!Array.isArray(obj.options) || obj.options.length === 0) {
+  // Count meaningful activities per time block
+  const timeBlocks = ['morning', 'afternoon', 'evening'];
+  const freeTimeBlocks = timeBlocks.filter(block => {
+    const blockItems = items.filter(i => i.time_block === block);
+    return blockItems.length === 0 || blockItems.every(i => 
+      i.title.toLowerCase().includes('free time') || 
+      i.title.toLowerCase().includes('rest') ||
+      i.title.toLowerCase().includes('leisure')
+    );
+  });
+  
+  // Rule: No "Free time" in all 3 slots of any day
+  if (freeTimeBlocks.length === 3) {
+    errors.push(`Day ${day.day}: All 3 time blocks are empty or free time`);
+  }
+  
+  // Count meaningful activities (not check-in, rest, etc.)
+  const meaningfulActivities = items.filter(i => {
+    const title = i.title.toLowerCase();
+    return !title.includes('check-in') && 
+           !title.includes('check-out') && 
+           !title.includes('free time') &&
+           !title.includes('rest') &&
+           !title.includes('leisure') &&
+           !title.includes('freshen up');
+  });
+  
+  // Rule: At least 2 meaningful activities per day (except arrival/departure)
+  const minActivities = (isArrivalDay || isDepartureDay) ? 1 : 2;
+  if (meaningfulActivities.length < minActivities) {
+    errors.push(`Day ${day.day}: Only ${meaningfulActivities.length} meaningful activities (need ${minActivities})`);
+  }
+  
+  // Rule: Each activity must have required fields
+  for (const item of items) {
+    if (!item.title || item.title.length < 2) {
+      errors.push(`Day ${day.day}: Item missing title`);
+    }
+    if (!item.location_area) {
+      errors.push(`Day ${day.day}: "${item.title}" missing location_area`);
+    }
+    if (!item.maps_query) {
+      errors.push(`Day ${day.day}: "${item.title}" missing maps_query`);
+    }
+  }
+  
+  return { valid: errors.length === 0, errors };
+}
+
+function validateItineraryOption(option: ItineraryOption): { valid: boolean; invalidDays: number[]; errors: string[] } {
+  const errors: string[] = [];
+  const invalidDays: number[] = [];
+  const numDays = option.days.length;
+  
+  for (const day of option.days) {
+    const isArrival = day.day === 1;
+    const isDeparture = day.day === numDays;
+    const validation = validateDayItems(day, isArrival, isDeparture);
+    
+    if (!validation.valid) {
+      invalidDays.push(day.day);
+      errors.push(...validation.errors);
+    }
+  }
+  
+  return { valid: invalidDays.length === 0, invalidDays, errors };
+}
+
+function parseAIResponse(content: string, retryCount: number): AIResponse {
+  const parsed = JSON.parse(content);
+  
+  if (!parsed || typeof parsed !== 'object') throw new Error('Invalid AI response');
+  
+  if (!Array.isArray(parsed.options) || parsed.options.length === 0) {
     throw new Error('Missing options array');
   }
   
   const options: ItineraryOption[] = [];
   const labels = ['A', 'B', 'C'];
   
-  for (let i = 0; i < obj.options.length && i < 3; i++) {
-    const opt = obj.options[i] as Record<string, unknown>;
+  for (let i = 0; i < parsed.options.length && i < 3; i++) {
+    const opt = parsed.options[i] as Record<string, unknown>;
     if (!opt.title || !opt.days || !Array.isArray(opt.days)) {
       if (retryCount === 0) throw new Error(`Invalid option ${i + 1}`);
       continue;
@@ -101,7 +195,6 @@ function validateAIResponse(data: unknown, retryCount: number): AIResponse {
     for (const d of opt.days as Record<string, unknown>[]) {
       const items: ItineraryItem[] = [];
       
-      // Parse legacy format (morning/afternoon/evening fields) or new items array
       if (Array.isArray(d.items)) {
         for (const item of d.items as Record<string, unknown>[]) {
           items.push({
@@ -116,37 +209,7 @@ function validateAIResponse(data: unknown, retryCount: number): AIResponse {
             food_related: item.food_related as boolean,
             transit_tip: item.transit_tip as string,
             assumptions: item.assumptions as string,
-          });
-        }
-      } else {
-        // Legacy format - convert morning/afternoon/evening to items
-        if (d.morning) {
-          items.push({
-            time_block: 'morning',
-            title: d.morning as string,
-            description: d.morning as string,
-          });
-        }
-        if (d.afternoon) {
-          items.push({
-            time_block: 'afternoon',
-            title: d.afternoon as string,
-            description: d.afternoon as string,
-          });
-        }
-        if (d.evening) {
-          items.push({
-            time_block: 'evening',
-            title: d.evening as string,
-            description: d.evening as string,
-          });
-        }
-        if (d.food) {
-          items.push({
-            time_block: 'night',
-            title: 'Food Recommendations',
-            description: d.food as string,
-            food_related: true,
+            maps_query: item.maps_query as string,
           });
         }
       }
@@ -178,9 +241,9 @@ function validateAIResponse(data: unknown, retryCount: number): AIResponse {
   
   return {
     options,
-    best_option_index: (obj.best_option_index as number) || 1,
-    general_tips: obj.general_tips as string[],
-    disclaimers: obj.disclaimers as string[],
+    best_option_index: (parsed.best_option_index as number) || 1,
+    general_tips: parsed.general_tips as string[],
+    disclaimers: parsed.disclaimers as string[],
   };
 }
 
@@ -277,12 +340,165 @@ async function checkTermsAccepted(supabase: SupabaseClient, userId: string): Pro
   return !!data;
 }
 
+async function fetchDestinationFacts(
+  supabase: SupabaseClient,
+  tripId: string,
+  destination: string,
+  tripType: string,
+  foodPref: string,
+  interests: string[]
+): Promise<DestinationFacts | null> {
+  // First check if we have cached facts
+  const { data: existingFacts } = await supabase
+    .from('destination_facts')
+    .select('attractions, food_spots')
+    .eq('trip_id', tripId)
+    .single();
+
+  if (existingFacts) {
+    console.log('[generate-itinerary] Using cached destination facts');
+    return existingFacts as DestinationFacts;
+  }
+
+  // Call enrich-destination edge function
+  console.log('[generate-itinerary] Fetching destination facts via enrichment...');
+  
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const response = await fetch(`${supabaseUrl}/functions/v1/enrich-destination`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+      },
+      body: JSON.stringify({
+        tripId,
+        destination,
+        tripType: tripType || 'mixed',
+        foodPreference: foodPref || 'mixed',
+        interests: interests || [],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('[generate-itinerary] Enrichment failed:', await response.text());
+      return null;
+    }
+
+    const data = await response.json();
+    return {
+      attractions: data.attractions || [],
+      food_spots: data.food_spots || [],
+    };
+  } catch (error) {
+    console.error('[generate-itinerary] Enrichment error:', error);
+    return null;
+  }
+}
+
+function buildPromptWithFacts(
+  days: number,
+  destination: string,
+  tripDetails: string,
+  facts: DestinationFacts | null
+): string {
+  let factsSection = '';
+  
+  if (facts && (facts.attractions.length > 0 || facts.food_spots.length > 0)) {
+    factsSection = `
+VERIFIED PLACES IN ${destination.toUpperCase()} (YOU MUST USE THESE):
+==========================================================
+
+ATTRACTIONS (pick from these for activities):
+${facts.attractions.map((a, i) => 
+  `${i + 1}. ${a.name} [${a.type}] - ${a.area}
+   - Why: ${a.reason}
+   - Maps: "${a.maps_query}"`
+).join('\n')}
+
+FOOD SPOTS (pick from these for meals):
+${facts.food_spots.map((f, i) => 
+  `${i + 1}. ${f.name} [${f.cuisine_type}] - ${f.area}
+   - Maps: "${f.maps_query}"`
+).join('\n')}
+
+CRITICAL RULES:
+1. At least 80% of activities MUST come from the VERIFIED PLACES lists above
+2. You may add up to 20% original suggestions ONLY if verified places don't cover enough variety
+3. Every activity MUST include the exact maps_query from the list (or create one for original additions)
+4. NEVER use generic activities like "Free time" or "Rest" for more than 1 time block per day
+5. Each day MUST have at least 2 meaningful activities (except Day 1 arrival and last day departure)
+`;
+  } else {
+    factsSection = `
+IMPORTANT: Generate realistic activities using REAL places in ${destination}.
+- Include the actual area/neighborhood name for each place
+- Create a maps_query for each: "Place Name, ${destination}"
+- NO generic "Free time" entries - always suggest specific activities
+`;
+  }
+
+  return `Create exactly 3 different travel itinerary options for a ${days}-day trip to ${destination}.
+
+${tripDetails}
+
+${factsSection}
+
+REQUIRED JSON STRUCTURE (return ONLY valid JSON, no markdown):
+{
+  "options": [
+    {
+      "option_index": 1,
+      "option_label": "A",
+      "title": "Theme Name (e.g., Adventure Explorer)",
+      "summary": "Brief 1-2 sentence summary",
+      "why_good_for_you": "Why this matches their preferences",
+      "pace": "relaxed|moderate|packed",
+      "total_cost_min": 15000,
+      "total_cost_max": 20000,
+      "family_friendly": true,
+      "pros": ["Pro 1", "Pro 2", "Pro 3"],
+      "cons": ["Con 1", "Con 2"],
+      "days": [
+        {
+          "day": 1,
+          "title": "Day 1 - Arrival & First Exploration",
+          "notes": "General notes for the day",
+          "items": [
+            {
+              "time_block": "morning|afternoon|evening|night",
+              "title": "REAL Place Name from List",
+              "description": "What to do here",
+              "location_area": "Actual Neighborhood",
+              "duration_minutes": 120,
+              "cost_min": 0,
+              "cost_max": 500,
+              "kid_friendly": true,
+              "food_related": false,
+              "transit_tip": "How to get there",
+              "maps_query": "Place Name, ${destination}"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "best_option_index": 1,
+  "general_tips": ["Tip 1", "Tip 2"],
+  "disclaimers": ["Prices may vary", "Verify timings before visiting"]
+}
+
+Create 3 diverse options: Option A (their preferred pace), Option B (alternative approach), Option C (budget-optimized).
+Include realistic cost estimates in INR. Mark any uncertain data in "assumptions" field.
+EVERY item MUST have: title, location_area, duration_minutes, cost range, and maps_query.`;
+}
+
 async function callAI(prompt: string, retryCount: number = 0): Promise<AIResponse> {
   const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
   
   const systemPrompt = retryCount > 0 
-    ? 'You are a travel planning expert. Return ONLY valid JSON. NO markdown, NO code blocks, NO explanations. If any data is uncertain (weather, hours, prices), include an "assumptions" field.'
-    : 'You are a travel planning expert. Return ONLY valid JSON, no markdown code blocks.';
+    ? 'You are a travel planning expert. Return ONLY valid JSON. NO markdown, NO code blocks, NO explanations. Every activity must have maps_query, location_area, and cost estimates.'
+    : 'You are a travel planning expert. Return ONLY valid JSON, no markdown code blocks. Include all required fields for each activity.';
 
   const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
     method: 'POST',
@@ -310,8 +526,7 @@ async function callAI(prompt: string, retryCount: number = 0): Promise<AIRespons
   content = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
   
   try {
-    const parsed = JSON.parse(content);
-    return validateAIResponse(parsed, retryCount);
+    return parseAIResponse(content, retryCount);
   } catch (e) {
     console.error('[generate-itinerary] Parse error:', e, content.substring(0, 500));
     if (retryCount === 0) {
@@ -319,6 +534,106 @@ async function callAI(prompt: string, retryCount: number = 0): Promise<AIRespons
       return callAI(prompt, 1);
     }
     throw new Error('Invalid AI response format after retry');
+  }
+}
+
+async function regenerateDay(
+  dayNumber: number,
+  destination: string,
+  tripDetails: string,
+  facts: DestinationFacts | null,
+  isArrival: boolean,
+  isDeparture: boolean
+): Promise<ItineraryDay | null> {
+  console.log(`[generate-itinerary] Regenerating day ${dayNumber}...`);
+  
+  const factsContext = facts ? `
+Available attractions: ${facts.attractions.map(a => `${a.name} (${a.type}, ${a.area})`).join(', ')}
+Available food spots: ${facts.food_spots.map(f => `${f.name} (${f.area})`).join(', ')}
+` : '';
+
+  const dayType = isArrival ? 'arrival day' : isDeparture ? 'departure day' : 'full day';
+  
+  const prompt = `Generate a single day plan (Day ${dayNumber}) for a trip to ${destination}.
+This is a ${dayType}.
+
+${tripDetails}
+
+${factsContext}
+
+Return ONLY valid JSON with this structure:
+{
+  "day": ${dayNumber},
+  "title": "Day ${dayNumber} - Theme",
+  "notes": "Optional notes",
+  "items": [
+    {
+      "time_block": "morning|afternoon|evening",
+      "title": "Real Place Name",
+      "description": "Activity description",
+      "location_area": "Neighborhood",
+      "duration_minutes": 120,
+      "cost_min": 0,
+      "cost_max": 500,
+      "kid_friendly": true,
+      "food_related": false,
+      "transit_tip": "How to get there",
+      "maps_query": "Place Name, ${destination}"
+    }
+  ]
+}
+
+Requirements:
+- At least ${isArrival || isDeparture ? '1' : '2'} meaningful activities
+- NO empty time blocks with just "Free time"
+- Every item needs maps_query, location_area, duration, and costs`;
+
+  try {
+    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: MODEL_USED,
+        messages: [
+          { role: 'system', content: 'Return ONLY valid JSON, no markdown.' },
+          { role: 'user', content: prompt }
+        ],
+      }),
+    });
+
+    if (!response.ok) return null;
+
+    const aiData = await response.json();
+    let content = aiData.choices?.[0]?.message?.content || '';
+    content = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    
+    const parsed = JSON.parse(content);
+    return {
+      day: parsed.day || dayNumber,
+      title: parsed.title || `Day ${dayNumber}`,
+      notes: parsed.notes,
+      items: (parsed.items || []).map((item: Record<string, unknown>) => ({
+        time_block: item.time_block || 'morning',
+        title: item.title || 'Activity',
+        description: item.description,
+        location_area: item.location_area,
+        duration_minutes: item.duration_minutes,
+        cost_min: item.cost_min,
+        cost_max: item.cost_max,
+        kid_friendly: item.kid_friendly,
+        food_related: item.food_related,
+        transit_tip: item.transit_tip,
+        assumptions: item.assumptions,
+        maps_query: item.maps_query,
+      })),
+    };
+  } catch (error) {
+    console.error(`[generate-itinerary] Day ${dayNumber} regeneration failed:`, error);
+    return null;
   }
 }
 
@@ -386,7 +701,6 @@ serve(async (req) => {
     if (existingItineraries && existingItineraries.length > 0) {
       const itineraryIds = existingItineraries.map(i => i.id);
       
-      // Get day IDs for cascade delete
       const { data: existingDays } = await supabase
         .from('itinerary_days')
         .select('id')
@@ -407,7 +721,7 @@ serve(async (req) => {
     const existingDuration = tripData.duration_days as number | null;
     const days = existingDuration || Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
-    // Build prompt
+    // Extract trip details
     const destination = tripData.destination as string;
     const isFamily = tripData.is_family as boolean;
     const budgetInr = tripData.budget_inr as number;
@@ -421,92 +735,87 @@ serve(async (req) => {
     const interests = tripData.interests as string[] || [];
     const notes = tripData.notes as string;
 
-    const prompt = `Create exactly 3 different travel itinerary options for a ${days}-day trip to ${destination}.
+    const tripType = isFamily ? 'family' : 'mixed';
 
-Trip Details:
+    // Step 1: Fetch enriched destination facts
+    console.log(`[generate-itinerary] Fetching destination facts for ${destination}...`);
+    const facts = await fetchDestinationFacts(
+      supabase,
+      tripId,
+      destination,
+      tripType,
+      foodPref,
+      interests
+    );
+    
+    if (facts) {
+      console.log(`[generate-itinerary] Got ${facts.attractions.length} attractions, ${facts.food_spots.length} food spots`);
+    } else {
+      console.log('[generate-itinerary] No enriched facts, proceeding with AI-only generation');
+    }
+
+    // Build trip details string
+    const tripDetailsStr = `Trip Details:
 - Budget: ₹${budgetInr} total (${budgetStyle} style)
 - Travelers: ${isFamily ? 'Family trip' : 'Individual/Friends'} - Adults: ${adultsCount}, Kids: ${kidsCount}
 - Food preference: ${foodPref}, Diet: ${diet}
 - Pace: ${pace}
 - Travel style: ${travelStyle}
 - Interests: ${JSON.stringify(interests)}
-${notes ? `- Additional notes: ${notes}` : ''}
+${notes ? `- Additional notes: ${notes}` : ''}`;
 
-Return ONLY valid JSON with this EXACT structure:
-{
-  "options": [
-    {
-      "option_index": 1,
-      "option_label": "A",
-      "title": "Adventure Seeker",
-      "summary": "Brief 1-2 sentence summary",
-      "why_good_for_you": "Why this matches their preferences",
-      "pace": "relaxed|moderate|packed",
-      "total_cost_min": 15000,
-      "total_cost_max": 20000,
-      "family_friendly": true,
-      "pros": ["Pro 1", "Pro 2", "Pro 3"],
-      "cons": ["Con 1", "Con 2"],
-      "days": [
-        {
-          "day": 1,
-          "title": "Day 1 - Arrival & Exploration",
-          "notes": "General notes for the day",
-          "items": [
-            {
-              "time_block": "morning",
-              "title": "Check-in at hotel",
-              "description": "Settle in and freshen up",
-              "location_area": "City Center",
-              "duration_minutes": 60,
-              "cost_min": 0,
-              "cost_max": 0,
-              "kid_friendly": true,
-              "food_related": false,
-              "transit_tip": "Take airport taxi, ~₹500",
-              "assumptions": "Check-in time 2PM"
-            },
-            {
-              "time_block": "afternoon",
-              "title": "Visit Local Market",
-              "description": "Explore local shops and street vendors",
-              "location_area": "Old Town",
-              "duration_minutes": 180,
-              "cost_min": 500,
-              "cost_max": 2000,
-              "kid_friendly": true,
-              "food_related": false,
-              "transit_tip": "Walking distance from hotel"
-            },
-            {
-              "time_block": "evening",
-              "title": "Dinner at Authentic Restaurant",
-              "description": "Try local cuisine",
-              "location_area": "Food Street",
-              "duration_minutes": 90,
-              "cost_min": 800,
-              "cost_max": 1500,
-              "kid_friendly": true,
-              "food_related": true
-            }
-          ]
-        }
-      ]
-    }
-  ],
-  "best_option_index": 1,
-  "general_tips": ["Tip 1", "Tip 2"],
-  "disclaimers": ["Prices may vary", "Verify timings before visiting"]
-}
-
-Create 3 diverse options: Option A (${pace}), Option B (alternative pace), Option C (budget-focused).
-Mark option_index 1 as recommended if it best matches preferences.
-Include realistic cost estimates in INR. Mark any uncertain data in "assumptions" field.`;
+    // Build prompt with facts
+    const prompt = buildPromptWithFacts(days, destination, tripDetailsStr, facts);
 
     console.log(`[generate-itinerary] Calling AI for ${days}-day trip to ${destination}`);
 
-    const aiResponse = await callAI(prompt);
+    let aiResponse = await callAI(prompt);
     
+    // Step 2: Validate each option and retry invalid days
+    for (let optIdx = 0; optIdx < aiResponse.options.length; optIdx++) {
+      const option = aiResponse.options[optIdx];
+      const validation = validateItineraryOption(option);
+      
+      if (!validation.valid) {
+        console.log(`[generate-itinerary] Option ${option.option_label} has ${validation.invalidDays.length} invalid days:`, validation.errors);
+        
+        // Retry invalid days (up to MAX_DAY_RETRIES)
+        for (const dayNum of validation.invalidDays) {
+          let retrySuccess = false;
+          
+          for (let retry = 0; retry < MAX_DAY_RETRIES && !retrySuccess; retry++) {
+            const isArrival = dayNum === 1;
+            const isDeparture = dayNum === days;
+            const newDay = await regenerateDay(
+              dayNum,
+              destination,
+              tripDetailsStr,
+              facts,
+              isArrival,
+              isDeparture
+            );
+            
+            if (newDay) {
+              const newValidation = validateDayItems(newDay, isArrival, isDeparture);
+              if (newValidation.valid) {
+                // Replace the day in the option
+                const dayIdx = option.days.findIndex(d => d.day === dayNum);
+                if (dayIdx >= 0) {
+                  option.days[dayIdx] = newDay;
+                  retrySuccess = true;
+                  console.log(`[generate-itinerary] Day ${dayNum} regenerated successfully`);
+                }
+              }
+            }
+          }
+          
+          if (!retrySuccess) {
+            console.log(`[generate-itinerary] Day ${dayNum} still invalid after ${MAX_DAY_RETRIES} retries, keeping original`);
+          }
+        }
+      }
+    }
+
     // Score each option
     const tripDataForScoring: TripData = {
       is_family: isFamily,
@@ -533,7 +842,6 @@ Include realistic cost estimates in INR. Mark any uncertain data in "assumptions
     const savedItineraries = [];
     
     for (const option of scoredOptions) {
-      // Insert main itinerary record
       const { data: itinerary, error: insertError } = await supabase
         .from('itineraries')
         .insert({
@@ -552,7 +860,7 @@ Include realistic cost estimates in INR. Mark any uncertain data in "assumptions
           cons: option.cons || [],
           score: option.score,
           model_used: MODEL_USED,
-          days: option.days, // Keep legacy field for compatibility
+          days: option.days,
           general_tips: aiResponse.general_tips || [],
           disclaimers: aiResponse.disclaimers || [],
         } as Record<string, unknown>)
@@ -604,6 +912,7 @@ Include realistic cost estimates in INR. Mark any uncertain data in "assumptions
               food_related: item.food_related,
               transit_tip: item.transit_tip,
               assumptions: item.assumptions,
+              maps_query: item.maps_query,
             } as Record<string, unknown>);
 
           if (itemError) {
@@ -634,7 +943,8 @@ Include realistic cost estimates in INR. Mark any uncertain data in "assumptions
         recommended: it.option_index === bestOptionIndex,
       })),
       best_option_index: bestOptionIndex,
-      remaining_generations: remaining - 1
+      remaining_generations: remaining - 1,
+      enriched: !!facts,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

@@ -238,6 +238,16 @@ export default function TripDetail() {
             <Clock className="w-3 h-3" /> {item.duration_minutes} min
           </span>
         )}
+        {(item as ItineraryItem & { maps_query?: string }).maps_query && (
+          <a
+            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((item as ItineraryItem & { maps_query?: string }).maps_query!)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-primary hover:underline"
+          >
+            <MapPin className="w-3 h-3" /> Open in Maps
+          </a>
+        )}
       </div>
 
       {item.transit_tip && (
