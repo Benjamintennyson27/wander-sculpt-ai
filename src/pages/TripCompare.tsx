@@ -11,59 +11,10 @@ import {
   Users, IndianRupee, CheckCircle2, XCircle,
   Lightbulb, AlertTriangle, ChevronDown, ChevronUp
 } from 'lucide-react';
-
-interface ItineraryItem {
-  id: string;
-  time_block: string;
-  title: string;
-  description: string;
-  location_area: string;
-  duration_minutes: number;
-  cost_min: number;
-  cost_max: number;
-  kid_friendly: boolean;
-  food_related: boolean;
-  transit_tip: string;
-  assumptions: string;
-}
-
-interface ItineraryDay {
-  id: string;
-  day_number: number;
-  title: string;
-  notes: string;
-  items: ItineraryItem[];
-}
-
-interface Itinerary {
-  id: string;
-  option_label: string;
-  option_index: number;
-  title: string;
-  summary: string;
-  why_good_for_you: string;
-  pace: string;
-  total_cost_min: number;
-  total_cost_max: number;
-  recommended: boolean;
-  pros: string[];
-  cons: string[];
-  score: number;
-  general_tips: string[];
-  disclaimers: string[];
-  days_data: ItineraryDay[];
-}
-
-interface Trip {
-  id: string;
-  destination: string;
-  start_date: string;
-  end_date: string;
-  budget_inr: number;
-  is_family: boolean;
-  status: string;
-  selected_itinerary_id: string | null;
-}
+import { 
+  Itinerary, Trip, ItineraryItem,
+  parseItinerary, getTimeBlockOrder, getPaceColor 
+} from '@/lib/itinerary-adapter';
 
 export default function TripCompare() {
   const { id } = useParams<{ id: string }>();
@@ -74,7 +25,7 @@ export default function TripCompare() {
   const [itineraries, setItineraries] = useState<Itinerary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTab, setSelectedTab] = useState('A');
-  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set());
+  const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set());
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -99,7 +50,7 @@ export default function TripCompare() {
 
     setTrip(tripData as Trip);
 
-    // Fetch itineraries with days and items
+    // Fetch itineraries - data is in days JSONB column
     const { data: itinerariesData, error: itinError } = await supabase
       .from('itineraries')
       .select('*')
@@ -112,74 +63,30 @@ export default function TripCompare() {
       return;
     }
 
-    const enrichedItineraries: Itinerary[] = [];
-
-    for (const itin of itinerariesData || []) {
-      // Fetch days for this itinerary
-      const { data: daysData } = await supabase
-        .from('itinerary_days')
-        .select('*')
-        .eq('itinerary_id', itin.id)
-        .order('day_number');
-
-      const daysWithItems: ItineraryDay[] = [];
-
-      for (const day of daysData || []) {
-        // Fetch items for this day
-        const { data: itemsData } = await supabase
-          .from('itinerary_items')
-          .select('*')
-          .eq('itinerary_day_id', day.id);
-
-        daysWithItems.push({
-          ...day,
-          items: (itemsData || []) as ItineraryItem[],
-        });
-      }
-
-      enrichedItineraries.push({
-        id: itin.id,
-        option_label: itin.option_label || String.fromCharCode(64 + itin.option_index),
-        option_index: itin.option_index,
-        title: itin.title,
-        summary: itin.summary || '',
-        why_good_for_you: itin.why_good_for_you || '',
-        pace: itin.pace || 'moderate',
-        total_cost_min: itin.total_cost_min || 0,
-        total_cost_max: itin.total_cost_max || 0,
-        recommended: itin.recommended || itin.is_best_option || false,
-        pros: (itin.pros as string[]) || [],
-        cons: (itin.cons as string[]) || [],
-        score: itin.score || 0,
-        general_tips: (itin.general_tips as string[]) || [],
-        disclaimers: (itin.disclaimers as string[]) || [],
-        days_data: daysWithItems,
-      });
-    }
-
-    setItineraries(enrichedItineraries);
+    const parsed = (itinerariesData || []).map(parseItinerary);
+    setItineraries(parsed);
     
     // Set initial tab to recommended option
-    const recommended = enrichedItineraries.find(i => i.recommended);
+    const recommended = parsed.find(i => i.recommended || i.is_best_option);
     if (recommended) {
       setSelectedTab(recommended.option_label);
-    } else if (enrichedItineraries.length > 0) {
-      setSelectedTab(enrichedItineraries[0].option_label);
+    } else if (parsed.length > 0) {
+      setSelectedTab(parsed[0].option_label);
     }
 
     // Expand first day by default
-    if (enrichedItineraries.length > 0 && enrichedItineraries[0].days_data.length > 0) {
-      setExpandedDays(new Set([enrichedItineraries[0].days_data[0].id]));
+    if (parsed.length > 0 && parsed[0].days.length > 0) {
+      setExpandedDays(new Set([parsed[0].days[0].day]));
     }
 
     setLoading(false);
   };
 
-  const toggleDay = (dayId: string) => {
+  const toggleDay = (dayNumber: number) => {
     setExpandedDays(prev => {
       const next = new Set(prev);
-      if (next.has(dayId)) next.delete(dayId);
-      else next.add(dayId);
+      if (next.has(dayNumber)) next.delete(dayNumber);
+      else next.add(dayNumber);
       return next;
     });
   };
@@ -202,19 +109,63 @@ export default function TripCompare() {
     setSaving(false);
   };
 
-  const getTimeBlockOrder = (block: string) => {
-    const order: Record<string, number> = { morning: 0, afternoon: 1, evening: 2, night: 3 };
-    return order[block] ?? 4;
-  };
+  const renderItemCard = (item: ItineraryItem, index: number) => (
+    <div 
+      key={index} 
+      className="p-3 rounded-lg bg-muted/30 border border-border/50 space-y-2"
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="text-xs capitalize">
+            {item.time_block}
+          </Badge>
+          {item.food_related && (
+            <Utensils className="w-3.5 h-3.5 text-orange-400" />
+          )}
+          {item.kid_friendly && (
+            <Users className="w-3.5 h-3.5 text-blue-400" />
+          )}
+        </div>
+        {(item.cost_min && item.cost_min > 0) || (item.cost_max && item.cost_max > 0) ? (
+          <span className="text-xs text-muted-foreground">
+            ₹{item.cost_min || 0} - ₹{item.cost_max || 0}
+          </span>
+        ) : null}
+      </div>
+      
+      <h5 className="font-medium">{item.title}</h5>
+      
+      {item.description && (
+        <p className="text-sm text-muted-foreground">{item.description}</p>
+      )}
+      
+      <div className="flex flex-wrap gap-2 text-xs">
+        {item.location_area && (
+          <span className="flex items-center gap-1 text-muted-foreground">
+            <MapPin className="w-3 h-3" /> {item.location_area}
+          </span>
+        )}
+        {item.duration_minutes && item.duration_minutes > 0 && (
+          <span className="flex items-center gap-1 text-muted-foreground">
+            <Clock className="w-3 h-3" /> {item.duration_minutes} min
+          </span>
+        )}
+      </div>
 
-  const getPaceColor = (pace: string) => {
-    switch (pace) {
-      case 'relaxed': return 'bg-green-500/20 text-green-400';
-      case 'moderate': return 'bg-yellow-500/20 text-yellow-400';
-      case 'packed': return 'bg-red-500/20 text-red-400';
-      default: return 'bg-muted text-muted-foreground';
-    }
-  };
+      {item.transit_tip && (
+        <p className="text-xs text-blue-400 bg-blue-500/10 p-2 rounded">
+          🚗 {item.transit_tip}
+        </p>
+      )}
+
+      {item.assumptions && (
+        <p className="text-xs text-yellow-400 bg-yellow-500/10 p-2 rounded flex items-start gap-1">
+          <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+          {item.assumptions}
+        </p>
+      )}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -251,7 +202,7 @@ export default function TripCompare() {
         <div className="container max-w-4xl mx-auto px-4 py-4">
           <div className="flex items-center gap-4">
             <Button variant="ghost" size="icon" asChild>
-              <Link to="/app">
+              <Link to={`/app/trip/${id}`}>
                 <ArrowLeft className="w-5 h-5" />
               </Link>
             </Button>
@@ -275,7 +226,7 @@ export default function TripCompare() {
               >
                 <span className="flex items-center gap-2">
                   Option {itin.option_label}
-                  {itin.recommended && (
+                  {(itin.recommended || itin.is_best_option) && (
                     <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" />
                   )}
                 </span>
@@ -291,7 +242,7 @@ export default function TripCompare() {
                   <div>
                     <div className="flex items-center gap-2 mb-2">
                       <h2 className="text-xl font-display font-semibold">{itin.title}</h2>
-                      {itin.recommended && (
+                      {(itin.recommended || itin.is_best_option) && (
                         <Badge variant="secondary" className="bg-yellow-500/20 text-yellow-500">
                           <Star className="w-3 h-3 mr-1 fill-current" />
                           Recommended
@@ -321,7 +272,7 @@ export default function TripCompare() {
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Clock className="w-4 h-4 text-muted-foreground" />
-                    <span>{itin.days_data.length} days</span>
+                    <span>{itin.days.length} days</span>
                   </div>
                 </div>
 
@@ -362,15 +313,15 @@ export default function TripCompare() {
               <div className="space-y-4">
                 <h3 className="text-lg font-medium">Day-by-Day Plan</h3>
                 
-                {itin.days_data.map(day => (
-                  <div key={day.id} className="glass-card overflow-hidden">
+                {itin.days.map(day => (
+                  <div key={day.day} className="glass-card overflow-hidden">
                     <button
-                      onClick={() => toggleDay(day.id)}
+                      onClick={() => toggleDay(day.day)}
                       className="w-full p-4 flex items-center justify-between hover:bg-muted/50 transition-colors"
                     >
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <span className="text-primary font-semibold">{day.day_number}</span>
+                          <span className="text-primary font-semibold">{day.day}</span>
                         </div>
                         <div className="text-left">
                           <h4 className="font-medium">{day.title}</h4>
@@ -379,74 +330,26 @@ export default function TripCompare() {
                           )}
                         </div>
                       </div>
-                      {expandedDays.has(day.id) ? (
+                      {expandedDays.has(day.day) ? (
                         <ChevronUp className="w-5 h-5 text-muted-foreground" />
                       ) : (
                         <ChevronDown className="w-5 h-5 text-muted-foreground" />
                       )}
                     </button>
 
-                    {expandedDays.has(day.id) && day.items.length > 0 && (
+                    {expandedDays.has(day.day) && day.items.length > 0 && (
                       <div className="px-4 pb-4 space-y-3">
                         {day.items
                           .sort((a, b) => getTimeBlockOrder(a.time_block) - getTimeBlockOrder(b.time_block))
-                          .map(item => (
-                            <div 
-                              key={item.id} 
-                              className="p-3 rounded-lg bg-muted/30 border border-border/50 space-y-2"
-                            >
-                              <div className="flex items-start justify-between">
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className="text-xs capitalize">
-                                    {item.time_block}
-                                  </Badge>
-                                  {item.food_related && (
-                                    <Utensils className="w-3.5 h-3.5 text-orange-400" />
-                                  )}
-                                  {item.kid_friendly && (
-                                    <Users className="w-3.5 h-3.5 text-blue-400" />
-                                  )}
-                                </div>
-                                {(item.cost_min > 0 || item.cost_max > 0) && (
-                                  <span className="text-xs text-muted-foreground">
-                                    ₹{item.cost_min} - ₹{item.cost_max}
-                                  </span>
-                                )}
-                              </div>
-                              
-                              <h5 className="font-medium">{item.title}</h5>
-                              
-                              {item.description && (
-                                <p className="text-sm text-muted-foreground">{item.description}</p>
-                              )}
-                              
-                              <div className="flex flex-wrap gap-2 text-xs">
-                                {item.location_area && (
-                                  <span className="flex items-center gap-1 text-muted-foreground">
-                                    <MapPin className="w-3 h-3" /> {item.location_area}
-                                  </span>
-                                )}
-                                {item.duration_minutes && (
-                                  <span className="flex items-center gap-1 text-muted-foreground">
-                                    <Clock className="w-3 h-3" /> {item.duration_minutes} min
-                                  </span>
-                                )}
-                              </div>
+                          .map((item, idx) => renderItemCard(item, idx))}
+                      </div>
+                    )}
 
-                              {item.transit_tip && (
-                                <p className="text-xs text-blue-400 bg-blue-500/10 p-2 rounded">
-                                  🚗 {item.transit_tip}
-                                </p>
-                              )}
-
-                              {item.assumptions && (
-                                <p className="text-xs text-yellow-400 bg-yellow-500/10 p-2 rounded flex items-start gap-1">
-                                  <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                                  {item.assumptions}
-                                </p>
-                              )}
-                            </div>
-                          ))}
+                    {expandedDays.has(day.day) && day.items.length === 0 && (
+                      <div className="px-4 pb-4">
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          Free day - no planned activities
+                        </p>
                       </div>
                     )}
                   </div>
@@ -459,49 +362,51 @@ export default function TripCompare() {
                   {itin.general_tips.length > 0 && (
                     <div className="space-y-2">
                       <h4 className="text-sm font-medium flex items-center gap-1">
-                        <Lightbulb className="w-4 h-4 text-yellow-400" /> Tips
+                        <Lightbulb className="w-4 h-4 text-primary" /> Travel Tips
                       </h4>
-                      <ul className="space-y-1 text-sm text-muted-foreground">
+                      <ul className="space-y-1">
                         {itin.general_tips.map((tip, idx) => (
-                          <li key={idx}>• {tip}</li>
+                          <li key={idx} className="text-sm text-muted-foreground flex items-start gap-2">
+                            <span className="text-primary">•</span> {tip}
+                          </li>
                         ))}
                       </ul>
                     </div>
                   )}
                   {itin.disclaimers.length > 0 && (
                     <div className="space-y-2">
-                      <h4 className="text-sm font-medium flex items-center gap-1">
-                        <AlertTriangle className="w-4 h-4 text-orange-400" /> Disclaimers
+                      <h4 className="text-sm font-medium flex items-center gap-1 text-yellow-500">
+                        <AlertTriangle className="w-4 h-4" /> Important Notes
                       </h4>
-                      <ul className="space-y-1 text-sm text-muted-foreground">
-                        {itin.disclaimers.map((d, idx) => (
-                          <li key={idx}>• {d}</li>
+                      <ul className="space-y-1">
+                        {itin.disclaimers.map((disc, idx) => (
+                          <li key={idx} className="text-sm text-muted-foreground">{disc}</li>
                         ))}
                       </ul>
                     </div>
                   )}
                 </div>
               )}
+
+              {/* Select Button */}
+              <Button
+                onClick={() => handleSelectItinerary(itin.id)}
+                className="w-full"
+                disabled={saving || trip.selected_itinerary_id === itin.id}
+              >
+                {trip.selected_itinerary_id === itin.id ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 mr-2" />
+                    Selected
+                  </>
+                ) : (
+                  'Select This Itinerary'
+                )}
+              </Button>
             </TabsContent>
           ))}
         </Tabs>
       </main>
-
-      {/* Fixed Bottom Action */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/80 backdrop-blur-xl border-t border-border/50">
-        <div className="container max-w-4xl mx-auto">
-          <Button 
-            className="w-full" 
-            size="lg"
-            onClick={() => handleSelectItinerary(currentItinerary.id)}
-            disabled={saving || trip.selected_itinerary_id === currentItinerary.id}
-          >
-            {trip.selected_itinerary_id === currentItinerary.id 
-              ? '✓ Selected' 
-              : `Select Option ${currentItinerary.option_label}`}
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }
