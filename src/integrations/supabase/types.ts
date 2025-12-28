@@ -14,6 +14,56 @@ export type Database = {
   }
   public: {
     Tables: {
+      destination_facts: {
+        Row: {
+          attractions: Json
+          created_at: string
+          destination: string
+          fetched_at: string
+          food_preference: string | null
+          food_spots: Json
+          id: string
+          model_used: string | null
+          raw_response: Json | null
+          trip_id: string
+          trip_type: string | null
+        }
+        Insert: {
+          attractions?: Json
+          created_at?: string
+          destination: string
+          fetched_at?: string
+          food_preference?: string | null
+          food_spots?: Json
+          id?: string
+          model_used?: string | null
+          raw_response?: Json | null
+          trip_id: string
+          trip_type?: string | null
+        }
+        Update: {
+          attractions?: Json
+          created_at?: string
+          destination?: string
+          fetched_at?: string
+          food_preference?: string | null
+          food_spots?: Json
+          id?: string
+          model_used?: string | null
+          raw_response?: Json | null
+          trip_id?: string
+          trip_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "destination_facts_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       itineraries: {
         Row: {
           cons: string[] | null
@@ -139,6 +189,7 @@ export type Database = {
           itinerary_day_id: string
           kid_friendly: boolean | null
           location_area: string | null
+          maps_query: string | null
           time_block: string
           title: string
           transit_tip: string | null
@@ -155,6 +206,7 @@ export type Database = {
           itinerary_day_id: string
           kid_friendly?: boolean | null
           location_area?: string | null
+          maps_query?: string | null
           time_block: string
           title: string
           transit_tip?: string | null
@@ -171,6 +223,7 @@ export type Database = {
           itinerary_day_id?: string
           kid_friendly?: boolean | null
           location_area?: string | null
+          maps_query?: string | null
           time_block?: string
           title?: string
           transit_tip?: string | null
