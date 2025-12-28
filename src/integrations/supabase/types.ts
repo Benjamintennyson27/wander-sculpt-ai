@@ -25,10 +25,15 @@ export type Database = {
           is_best_option: boolean | null
           model_used: string | null
           option_index: number
+          option_label: string | null
+          pace: string | null
           pros: string[] | null
+          recommended: boolean | null
           score: number | null
           summary: string | null
           title: string
+          total_cost_max: number | null
+          total_cost_min: number | null
           trip_id: string
           why_good_for_you: string | null
         }
@@ -42,10 +47,15 @@ export type Database = {
           is_best_option?: boolean | null
           model_used?: string | null
           option_index: number
+          option_label?: string | null
+          pace?: string | null
           pros?: string[] | null
+          recommended?: boolean | null
           score?: number | null
           summary?: string | null
           title: string
+          total_cost_max?: number | null
+          total_cost_min?: number | null
           trip_id: string
           why_good_for_you?: string | null
         }
@@ -59,10 +69,15 @@ export type Database = {
           is_best_option?: boolean | null
           model_used?: string | null
           option_index?: number
+          option_label?: string | null
+          pace?: string | null
           pros?: string[] | null
+          recommended?: boolean | null
           score?: number | null
           summary?: string | null
           title?: string
+          total_cost_max?: number | null
+          total_cost_min?: number | null
           trip_id?: string
           why_good_for_you?: string | null
         }
@@ -72,6 +87,100 @@ export type Database = {
             columns: ["trip_id"]
             isOneToOne: false
             referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      itinerary_days: {
+        Row: {
+          created_at: string
+          day_number: number
+          id: string
+          itinerary_id: string
+          notes: string | null
+          title: string
+        }
+        Insert: {
+          created_at?: string
+          day_number: number
+          id?: string
+          itinerary_id: string
+          notes?: string | null
+          title: string
+        }
+        Update: {
+          created_at?: string
+          day_number?: number
+          id?: string
+          itinerary_id?: string
+          notes?: string | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "itinerary_days_itinerary_id_fkey"
+            columns: ["itinerary_id"]
+            isOneToOne: false
+            referencedRelation: "itineraries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      itinerary_items: {
+        Row: {
+          assumptions: string | null
+          cost_max: number | null
+          cost_min: number | null
+          created_at: string
+          description: string | null
+          duration_minutes: number | null
+          food_related: boolean | null
+          id: string
+          itinerary_day_id: string
+          kid_friendly: boolean | null
+          location_area: string | null
+          time_block: string
+          title: string
+          transit_tip: string | null
+        }
+        Insert: {
+          assumptions?: string | null
+          cost_max?: number | null
+          cost_min?: number | null
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number | null
+          food_related?: boolean | null
+          id?: string
+          itinerary_day_id: string
+          kid_friendly?: boolean | null
+          location_area?: string | null
+          time_block: string
+          title: string
+          transit_tip?: string | null
+        }
+        Update: {
+          assumptions?: string | null
+          cost_max?: number | null
+          cost_min?: number | null
+          created_at?: string
+          description?: string | null
+          duration_minutes?: number | null
+          food_related?: boolean | null
+          id?: string
+          itinerary_day_id?: string
+          kid_friendly?: boolean | null
+          location_area?: string | null
+          time_block?: string
+          title?: string
+          transit_tip?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "itinerary_items_itinerary_day_id_fkey"
+            columns: ["itinerary_day_id"]
+            isOneToOne: false
+            referencedRelation: "itinerary_days"
             referencedColumns: ["id"]
           },
         ]

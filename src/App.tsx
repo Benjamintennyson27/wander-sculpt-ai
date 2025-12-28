@@ -10,6 +10,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import NewTrip from "./pages/NewTrip";
 import TripDetail from "./pages/TripDetail";
+import TripCompare from "./pages/TripCompare";
 import Terms from "./pages/Terms";
 import NotFound from "./pages/NotFound";
 
@@ -44,6 +45,11 @@ const App = () => (
             <Route path="/app/trip/:id" element={
               <ProtectedRoute>
                 <TripDetail />
+              </ProtectedRoute>
+            } />
+            <Route path="/app/trip/:id/compare" element={
+              <ProtectedRoute>
+                <TripCompare />
               </ProtectedRoute>
             } />
             {/* Development-only debug route */}
