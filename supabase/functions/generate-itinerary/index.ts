@@ -10,7 +10,11 @@ const CURRENT_TERMS_VERSION = '1.0';
 const RATE_LIMIT_PER_HOUR = 3;
 const MODEL_USED = 'google/gemini-2.5-flash';
 
-// Scoring function to rank itineraries based on user preferences
+// Zod-like validation (simplified for edge function)
+interface TripInput {
+  tripId: string;
+}
+
 interface TripData {
   is_family: boolean;
   pace: string;
@@ -22,29 +26,170 @@ interface TripData {
   travel_style?: string;
 }
 
+interface ItineraryItem {
+  time_block: 'morning' | 'afternoon' | 'evening' | 'night';
+  title: string;
+  description?: string;
+  location_area?: string;
+  duration_minutes?: number;
+  cost_min?: number;
+  cost_max?: number;
+  kid_friendly?: boolean;
+  food_related?: boolean;
+  transit_tip?: string;
+  assumptions?: string;
+}
+
+interface ItineraryDay {
+  day: number;
+  title: string;
+  notes?: string;
+  items: ItineraryItem[];
+}
+
 interface ItineraryOption {
   option_index: number;
+  option_label: string;
   title: string;
   summary: string;
   why_good_for_you?: string;
-  days: unknown[];
-  estimated_daily_budget?: string;
+  pace: 'relaxed' | 'moderate' | 'packed';
+  total_cost_min?: number;
+  total_cost_max?: number;
+  recommended?: boolean;
+  family_friendly?: boolean;
   pros?: string[];
   cons?: string[];
-  pace?: string;
-  family_friendly?: boolean;
-  food_style_matches?: boolean;
+  days: ItineraryDay[];
+}
+
+interface AIResponse {
+  options: ItineraryOption[];
+  best_option_index: number;
+  general_tips?: string[];
+  disclaimers?: string[];
+}
+
+function validateInput(data: unknown): TripInput {
+  if (!data || typeof data !== 'object') throw new Error('Invalid input');
+  const obj = data as Record<string, unknown>;
+  if (typeof obj.tripId !== 'string' || !obj.tripId.match(/^[0-9a-f-]{36}$/)) {
+    throw new Error('Invalid tripId format');
+  }
+  return { tripId: obj.tripId };
+}
+
+function validateAIResponse(data: unknown, retryCount: number): AIResponse {
+  if (!data || typeof data !== 'object') throw new Error('Invalid AI response');
+  const obj = data as Record<string, unknown>;
+  
+  if (!Array.isArray(obj.options) || obj.options.length === 0) {
+    throw new Error('Missing options array');
+  }
+  
+  const options: ItineraryOption[] = [];
+  const labels = ['A', 'B', 'C'];
+  
+  for (let i = 0; i < obj.options.length && i < 3; i++) {
+    const opt = obj.options[i] as Record<string, unknown>;
+    if (!opt.title || !opt.days || !Array.isArray(opt.days)) {
+      if (retryCount === 0) throw new Error(`Invalid option ${i + 1}`);
+      continue;
+    }
+    
+    const days: ItineraryDay[] = [];
+    for (const d of opt.days as Record<string, unknown>[]) {
+      const items: ItineraryItem[] = [];
+      
+      // Parse legacy format (morning/afternoon/evening fields) or new items array
+      if (Array.isArray(d.items)) {
+        for (const item of d.items as Record<string, unknown>[]) {
+          items.push({
+            time_block: (item.time_block as string || 'morning') as ItineraryItem['time_block'],
+            title: item.title as string || 'Activity',
+            description: item.description as string,
+            location_area: item.location_area as string,
+            duration_minutes: item.duration_minutes as number,
+            cost_min: item.cost_min as number,
+            cost_max: item.cost_max as number,
+            kid_friendly: item.kid_friendly as boolean,
+            food_related: item.food_related as boolean,
+            transit_tip: item.transit_tip as string,
+            assumptions: item.assumptions as string,
+          });
+        }
+      } else {
+        // Legacy format - convert morning/afternoon/evening to items
+        if (d.morning) {
+          items.push({
+            time_block: 'morning',
+            title: d.morning as string,
+            description: d.morning as string,
+          });
+        }
+        if (d.afternoon) {
+          items.push({
+            time_block: 'afternoon',
+            title: d.afternoon as string,
+            description: d.afternoon as string,
+          });
+        }
+        if (d.evening) {
+          items.push({
+            time_block: 'evening',
+            title: d.evening as string,
+            description: d.evening as string,
+          });
+        }
+        if (d.food) {
+          items.push({
+            time_block: 'night',
+            title: 'Food Recommendations',
+            description: d.food as string,
+            food_related: true,
+          });
+        }
+      }
+      
+      days.push({
+        day: (d.day as number) || days.length + 1,
+        title: (d.title as string) || `Day ${days.length + 1}`,
+        notes: d.notes as string,
+        items,
+      });
+    }
+    
+    options.push({
+      option_index: i + 1,
+      option_label: labels[i],
+      title: opt.title as string,
+      summary: opt.summary as string || '',
+      why_good_for_you: opt.why_good_for_you as string,
+      pace: (opt.pace as string || 'moderate') as ItineraryOption['pace'],
+      total_cost_min: opt.total_cost_min as number,
+      total_cost_max: opt.total_cost_max as number,
+      recommended: opt.recommended as boolean,
+      family_friendly: opt.family_friendly as boolean,
+      pros: (opt.pros as string[]) || [],
+      cons: (opt.cons as string[]) || [],
+      days,
+    });
+  }
+  
+  return {
+    options,
+    best_option_index: (obj.best_option_index as number) || 1,
+    general_tips: obj.general_tips as string[],
+    disclaimers: obj.disclaimers as string[],
+  };
 }
 
 function scoreItinerary(option: ItineraryOption, trip: TripData): number {
-  let score = 50; // Base score
+  let score = 50;
 
-  // Family trip considerations (+15 if family-friendly for family trips)
   if (trip.is_family) {
     if (option.family_friendly !== false) score += 10;
-    // Prefer relaxed/moderate pace for families
     if (option.pace === 'relaxed' || option.pace === 'moderate') score += 5;
-    // Kids bonus
     if (trip.kids_count && trip.kids_count > 0) {
       if (option.title?.toLowerCase().includes('family') || 
           option.summary?.toLowerCase().includes('kid')) {
@@ -53,38 +198,21 @@ function scoreItinerary(option: ItineraryOption, trip: TripData): number {
     }
   }
 
-  // Pace alignment (+10)
-  const optionPace = option.pace || 
-    (option.title?.toLowerCase().includes('packed') ? 'packed' : 
-     option.title?.toLowerCase().includes('relax') ? 'relaxed' : 'moderate');
-  
-  if (optionPace === trip.pace) score += 10;
+  if (option.pace === trip.pace) score += 10;
 
-  // Budget fit (+10)
-  if (option.estimated_daily_budget && trip.duration_days) {
-    const dailyBudget = trip.budget_inr / trip.duration_days;
-    const estimatedBudget = parseInt(option.estimated_daily_budget.replace(/[^0-9]/g, '')) || 0;
-    if (estimatedBudget > 0 && estimatedBudget <= dailyBudget * 1.2) {
-      score += 10;
-    }
+  if (option.total_cost_max && trip.budget_inr) {
+    if (option.total_cost_max <= trip.budget_inr * 1.1) score += 10;
   }
 
-  // Food preference alignment (+5)
-  if (option.food_style_matches) score += 5;
-
-  // Interest coverage (+5 per matched interest, max 20)
   if (trip.interests && option.summary) {
     const summaryLower = option.summary.toLowerCase();
     let matched = 0;
     for (const interest of trip.interests) {
-      if (summaryLower.includes(interest.toLowerCase())) {
-        matched++;
-      }
+      if (summaryLower.includes(interest.toLowerCase())) matched++;
     }
     score += Math.min(matched * 5, 20);
   }
 
-  // Travel style alignment (+5)
   if (trip.travel_style) {
     const titleLower = option.title?.toLowerCase() || '';
     if (trip.travel_style === 'adventure' && titleLower.includes('adventure')) score += 5;
@@ -94,11 +222,9 @@ function scoreItinerary(option: ItineraryOption, trip: TripData): number {
   return Math.min(100, Math.max(0, score));
 }
 
-// Rate limiting check
 async function checkRateLimit(supabase: SupabaseClient, userId: string): Promise<{ allowed: boolean; remaining: number }> {
   const today = new Date().toISOString().split('T')[0];
   
-  // Get or create rate limit record
   const { data: existing } = await supabase
     .from('rate_limits')
     .select('id, generation_count')
@@ -112,7 +238,6 @@ async function checkRateLimit(supabase: SupabaseClient, userId: string): Promise
     return { allowed: count < RATE_LIMIT_PER_HOUR, remaining };
   }
 
-  // Create new record
   await supabase.from('rate_limits').insert({
     user_id: userId,
     date: today,
@@ -122,7 +247,6 @@ async function checkRateLimit(supabase: SupabaseClient, userId: string): Promise
   return { allowed: true, remaining: RATE_LIMIT_PER_HOUR };
 }
 
-// Increment rate limit counter
 async function incrementRateLimit(supabase: SupabaseClient, userId: string) {
   const today = new Date().toISOString().split('T')[0];
   
@@ -142,7 +266,6 @@ async function incrementRateLimit(supabase: SupabaseClient, userId: string) {
   }
 }
 
-// Check terms acceptance
 async function checkTermsAccepted(supabase: SupabaseClient, userId: string): Promise<boolean> {
   const { data } = await supabase
     .from('terms_acceptance')
@@ -154,13 +277,59 @@ async function checkTermsAccepted(supabase: SupabaseClient, userId: string): Pro
   return !!data;
 }
 
+async function callAI(prompt: string, retryCount: number = 0): Promise<AIResponse> {
+  const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+  
+  const systemPrompt = retryCount > 0 
+    ? 'You are a travel planning expert. Return ONLY valid JSON. NO markdown, NO code blocks, NO explanations. If any data is uncertain (weather, hours, prices), include an "assumptions" field.'
+    : 'You are a travel planning expert. Return ONLY valid JSON, no markdown code blocks.';
+
+  const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${lovableApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: MODEL_USED,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    console.error('[generate-itinerary] AI error:', errText);
+    throw new Error('AI generation failed');
+  }
+
+  const aiData = await response.json();
+  let content = aiData.choices?.[0]?.message?.content || '';
+  content = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  
+  try {
+    const parsed = JSON.parse(content);
+    return validateAIResponse(parsed, retryCount);
+  } catch (e) {
+    console.error('[generate-itinerary] Parse error:', e, content.substring(0, 500));
+    if (retryCount === 0) {
+      console.log('[generate-itinerary] Retrying with stricter prompt...');
+      return callAI(prompt, 1);
+    }
+    throw new Error('Invalid AI response format after retry');
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { tripId } = await req.json();
+    const input = validateInput(await req.json());
+    const { tripId } = input;
     
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -185,7 +354,6 @@ serve(async (req) => {
     // Check terms acceptance
     const termsAccepted = await checkTermsAccepted(supabase, userId);
     if (!termsAccepted) {
-      console.log(`[generate-itinerary] Terms not accepted for user ${userId}`);
       return new Response(JSON.stringify({
         error: 'TERMS_REQUIRED',
         message: 'Please accept terms and conditions before generating',
@@ -199,10 +367,9 @@ serve(async (req) => {
     // Check rate limit
     const { allowed, remaining } = await checkRateLimit(supabase, userId);
     if (!allowed) {
-      console.log(`[generate-itinerary] Rate limit exceeded for user ${userId}`);
       return new Response(JSON.stringify({
         error: 'RATE_LIMIT_EXCEEDED',
-        message: `You have reached the limit of ${RATE_LIMIT_PER_HOUR} generations per day. Try again tomorrow.`,
+        message: `You have reached the limit of ${RATE_LIMIT_PER_HOUR} generations per day.`,
         remaining: 0
       }), {
         status: 429,
@@ -210,39 +377,28 @@ serve(async (req) => {
       });
     }
 
-    // Delete existing itineraries for this trip (regeneration)
-    await supabase.from('itineraries').delete().eq('trip_id', tripId);
-
-    // Build search queries for You API
-    const youApiKey = Deno.env.get('YOU_API_KEY');
-    let searchResults = '';
-    const destination = tripData.destination as string;
-    const foodPref = tripData.food_pref as string;
-    const diet = tripData.diet as string;
+    // Delete existing data for this trip (regeneration)
+    const { data: existingItineraries } = await supabase
+      .from('itineraries')
+      .select('id')
+      .eq('trip_id', tripId);
     
-    if (youApiKey) {
-      const queries = [
-        `top attractions in ${destination}`,
-        `best ${foodPref === 'street_food' ? 'street food' : 'restaurants'} in ${destination} ${diet === 'veg' ? 'vegetarian' : ''}`,
-        `local tips for visiting ${destination}`,
-      ];
-
-      for (const query of queries) {
-        try {
-          const searchResp = await fetch(`https://api.ydc-index.io/search?query=${encodeURIComponent(query)}`, {
-            headers: { 'X-API-Key': youApiKey }
-          });
-          if (searchResp.ok) {
-            const searchData = await searchResp.json();
-            const snippets = searchData.hits?.slice(0, 3).map((h: { title: string; description: string }) => 
-              `${h.title}: ${h.description}`
-            ).join('\n') || '';
-            searchResults += `\n${query}:\n${snippets}\n`;
-          }
-        } catch (e) {
-          console.log('[generate-itinerary] Search error:', e);
-        }
+    if (existingItineraries && existingItineraries.length > 0) {
+      const itineraryIds = existingItineraries.map(i => i.id);
+      
+      // Get day IDs for cascade delete
+      const { data: existingDays } = await supabase
+        .from('itinerary_days')
+        .select('id')
+        .in('itinerary_id', itineraryIds);
+      
+      if (existingDays && existingDays.length > 0) {
+        const dayIds = existingDays.map(d => d.id);
+        await supabase.from('itinerary_items').delete().in('itinerary_day_id', dayIds);
+        await supabase.from('itinerary_days').delete().in('itinerary_id', itineraryIds);
       }
+      
+      await supabase.from('itineraries').delete().eq('trip_id', tripId);
     }
 
     // Calculate trip duration
@@ -251,153 +407,209 @@ serve(async (req) => {
     const existingDuration = tripData.duration_days as number | null;
     const days = existingDuration || Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
-    // Build enhanced prompt with pros/cons request
+    // Build prompt
+    const destination = tripData.destination as string;
     const isFamily = tripData.is_family as boolean;
     const budgetInr = tripData.budget_inr as number;
     const budgetStyle = tripData.budget_style as string;
     const adultsCount = tripData.adults_count as number || 1;
     const kidsCount = tripData.kids_count as number || 0;
-    const pace = tripData.pace as string;
+    const pace = tripData.pace as string || 'moderate';
+    const foodPref = tripData.food_pref as string;
+    const diet = tripData.diet as string;
     const travelStyle = tripData.travel_style as string || 'mixed';
-    const stayPreference = tripData.stay_preference as string;
     const interests = tripData.interests as string[] || [];
     const notes = tripData.notes as string;
 
     const prompt = `Create exactly 3 different travel itinerary options for a ${days}-day trip to ${destination}.
 
 Trip Details:
-- Budget: ₹${budgetInr} (${budgetStyle} style)
+- Budget: ₹${budgetInr} total (${budgetStyle} style)
 - Travelers: ${isFamily ? 'Family trip' : 'Individual/Friends'} - Adults: ${adultsCount}, Kids: ${kidsCount}
 - Food preference: ${foodPref}, Diet: ${diet}
 - Pace: ${pace}
 - Travel style: ${travelStyle}
-- Stay preference: ${stayPreference}
 - Interests: ${JSON.stringify(interests)}
 ${notes ? `- Additional notes: ${notes}` : ''}
-
-${searchResults ? `Recent search results for reference:\n${searchResults}` : ''}
 
 Return ONLY valid JSON with this EXACT structure:
 {
   "options": [
     {
       "option_index": 1,
+      "option_label": "A",
       "title": "Adventure Seeker",
       "summary": "Brief 1-2 sentence summary",
       "why_good_for_you": "Why this matches their preferences",
       "pace": "relaxed|moderate|packed",
+      "total_cost_min": 15000,
+      "total_cost_max": 20000,
       "family_friendly": true,
-      "estimated_daily_budget": "₹5000",
       "pros": ["Pro 1", "Pro 2", "Pro 3"],
       "cons": ["Con 1", "Con 2"],
       "days": [
         {
           "day": 1,
-          "morning": "Activity description with timing",
-          "afternoon": "Activity description",
-          "evening": "Activity description",
-          "food": "Specific restaurant/food recommendations",
-          "notes": "Travel tips, estimated costs"
+          "title": "Day 1 - Arrival & Exploration",
+          "notes": "General notes for the day",
+          "items": [
+            {
+              "time_block": "morning",
+              "title": "Check-in at hotel",
+              "description": "Settle in and freshen up",
+              "location_area": "City Center",
+              "duration_minutes": 60,
+              "cost_min": 0,
+              "cost_max": 0,
+              "kid_friendly": true,
+              "food_related": false,
+              "transit_tip": "Take airport taxi, ~₹500",
+              "assumptions": "Check-in time 2PM"
+            },
+            {
+              "time_block": "afternoon",
+              "title": "Visit Local Market",
+              "description": "Explore local shops and street vendors",
+              "location_area": "Old Town",
+              "duration_minutes": 180,
+              "cost_min": 500,
+              "cost_max": 2000,
+              "kid_friendly": true,
+              "food_related": false,
+              "transit_tip": "Walking distance from hotel"
+            },
+            {
+              "time_block": "evening",
+              "title": "Dinner at Authentic Restaurant",
+              "description": "Try local cuisine",
+              "location_area": "Food Street",
+              "duration_minutes": 90,
+              "cost_min": 800,
+              "cost_max": 1500,
+              "kid_friendly": true,
+              "food_related": true
+            }
+          ]
         }
       ]
     }
   ],
   "best_option_index": 1,
   "general_tips": ["Tip 1", "Tip 2"],
-  "disclaimers": ["Prices and timings may vary", "Please verify before visiting"]
+  "disclaimers": ["Prices may vary", "Verify timings before visiting"]
 }
 
-Create exactly 3 diverse options with different paces/styles. Include realistic pros and cons for each. Option 1 should be ${pace || 'moderate'} pace.`;
+Create 3 diverse options: Option A (${pace}), Option B (alternative pace), Option C (budget-focused).
+Mark option_index 1 as recommended if it best matches preferences.
+Include realistic cost estimates in INR. Mark any uncertain data in "assumptions" field.`;
 
     console.log(`[generate-itinerary] Calling AI for ${days}-day trip to ${destination}`);
 
-    // Call Lovable AI
-    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: MODEL_USED,
-        messages: [
-          { role: 'system', content: 'You are a travel planning expert. Return ONLY valid JSON, no markdown code blocks.' },
-          { role: 'user', content: prompt }
-        ],
-      }),
-    });
-
-    if (!aiResponse.ok) {
-      const errText = await aiResponse.text();
-      console.error('[generate-itinerary] AI error:', errText);
-      throw new Error('AI generation failed');
-    }
-
-    const aiData = await aiResponse.json();
-    let content = aiData.choices?.[0]?.message?.content || '';
+    const aiResponse = await callAI(prompt);
     
-    // Clean JSON (remove markdown code blocks if present)
-    content = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    
-    let itineraryData;
-    try {
-      itineraryData = JSON.parse(content);
-    } catch (e) {
-      console.error('[generate-itinerary] JSON parse error:', content.substring(0, 500));
-      throw new Error('Invalid AI response format');
-    }
-
-    if (!itineraryData.options || !Array.isArray(itineraryData.options)) {
-      console.error('[generate-itinerary] Invalid structure:', JSON.stringify(itineraryData).substring(0, 500));
-      throw new Error('Invalid itinerary structure');
-    }
-
-    console.log(`[generate-itinerary] Received ${itineraryData.options.length} options from AI`);
-
     // Score each option
     const tripDataForScoring: TripData = {
       is_family: isFamily,
-      pace: pace,
+      pace,
       budget_inr: budgetInr,
       duration_days: days,
       food_pref: foodPref,
-      interests: interests,
+      interests,
       kids_count: kidsCount,
       travel_style: travelStyle
     };
 
-    const scoredOptions = itineraryData.options.map((option: ItineraryOption) => ({
+    const scoredOptions = aiResponse.options.map(option => ({
       ...option,
       score: scoreItinerary(option, tripDataForScoring)
     }));
 
-    // Sort by score to find best
-    scoredOptions.sort((a: { score: number }, b: { score: number }) => b.score - a.score);
+    scoredOptions.sort((a, b) => b.score - a.score);
     const bestOptionIndex = scoredOptions[0]?.option_index || 1;
 
-    console.log(`[generate-itinerary] Scores: ${scoredOptions.map((o: ItineraryOption & { score: number }) => `Option ${o.option_index}: ${o.score}`).join(', ')}`);
+    console.log(`[generate-itinerary] Scores: ${scoredOptions.map(o => `${o.option_label}: ${o.score}`).join(', ')}`);
 
-    // Save itineraries with scores and pros/cons
+    // Save itineraries with new granular structure
+    const savedItineraries = [];
+    
     for (const option of scoredOptions) {
-      const { error: insertError } = await supabase.from('itineraries').insert({
-        trip_id: tripId,
-        option_index: option.option_index,
-        title: option.title,
-        summary: option.summary,
-        why_good_for_you: option.why_good_for_you,
-        days: option.days,
-        general_tips: itineraryData.general_tips || [],
-        disclaimers: itineraryData.disclaimers || [],
-        is_best_option: option.option_index === bestOptionIndex,
-        pros: option.pros || [],
-        cons: option.cons || [],
-        score: option.score,
-        model_used: MODEL_USED
-      } as Record<string, unknown>);
+      // Insert main itinerary record
+      const { data: itinerary, error: insertError } = await supabase
+        .from('itineraries')
+        .insert({
+          trip_id: tripId,
+          option_index: option.option_index,
+          option_label: option.option_label,
+          title: option.title,
+          summary: option.summary,
+          why_good_for_you: option.why_good_for_you,
+          pace: option.pace,
+          total_cost_min: option.total_cost_min,
+          total_cost_max: option.total_cost_max,
+          recommended: option.option_index === bestOptionIndex,
+          is_best_option: option.option_index === bestOptionIndex,
+          pros: option.pros || [],
+          cons: option.cons || [],
+          score: option.score,
+          model_used: MODEL_USED,
+          days: option.days, // Keep legacy field for compatibility
+          general_tips: aiResponse.general_tips || [],
+          disclaimers: aiResponse.disclaimers || [],
+        } as Record<string, unknown>)
+        .select('id')
+        .single();
 
-      if (insertError) {
-        console.error('[generate-itinerary] Insert error:', insertError);
+      if (insertError || !itinerary) {
+        console.error('[generate-itinerary] Insert itinerary error:', insertError);
+        continue;
+      }
+
+      const itineraryId = itinerary.id;
+      savedItineraries.push({ ...option, id: itineraryId });
+
+      // Insert days and items
+      for (const day of option.days) {
+        const { data: dayRecord, error: dayError } = await supabase
+          .from('itinerary_days')
+          .insert({
+            itinerary_id: itineraryId,
+            day_number: day.day,
+            title: day.title,
+            notes: day.notes,
+          } as Record<string, unknown>)
+          .select('id')
+          .single();
+
+        if (dayError || !dayRecord) {
+          console.error('[generate-itinerary] Insert day error:', dayError);
+          continue;
+        }
+
+        const dayId = dayRecord.id;
+
+        // Insert items for this day
+        for (const item of day.items) {
+          const { error: itemError } = await supabase
+            .from('itinerary_items')
+            .insert({
+              itinerary_day_id: dayId,
+              time_block: item.time_block,
+              title: item.title,
+              description: item.description,
+              location_area: item.location_area,
+              duration_minutes: item.duration_minutes,
+              cost_min: item.cost_min,
+              cost_max: item.cost_max,
+              kid_friendly: item.kid_friendly,
+              food_related: item.food_related,
+              transit_tip: item.transit_tip,
+              assumptions: item.assumptions,
+            } as Record<string, unknown>);
+
+          if (itemError) {
+            console.error('[generate-itinerary] Insert item error:', itemError);
+          }
+        }
       }
     }
 
@@ -410,14 +622,18 @@ Create exactly 3 diverse options with different paces/styles. Include realistic 
     // Increment rate limit
     await incrementRateLimit(supabase, userId);
 
-    console.log(`[generate-itinerary] Successfully generated ${scoredOptions.length} itineraries for trip ${tripId}`);
+    console.log(`[generate-itinerary] Successfully generated ${savedItineraries.length} itineraries`);
 
     return new Response(JSON.stringify({ 
       success: true,
-      best_option: {
-        option_index: bestOptionIndex,
-        score: scoredOptions[0]?.score
-      },
+      itineraries: savedItineraries.map(it => ({
+        id: it.id,
+        option_label: it.option_label,
+        title: it.title,
+        score: it.score,
+        recommended: it.option_index === bestOptionIndex,
+      })),
+      best_option_index: bestOptionIndex,
       remaining_generations: remaining - 1
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -426,7 +642,6 @@ Create exactly 3 diverse options with different paces/styles. Include realistic 
   } catch (error) {
     console.error('[generate-itinerary] Error:', error);
     
-    // Update trip status to failed
     try {
       const { tripId } = await req.clone().json();
       const supabase = createClient(

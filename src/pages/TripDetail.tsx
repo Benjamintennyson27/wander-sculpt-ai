@@ -229,22 +229,29 @@ export default function TripDetail() {
         {/* Itineraries */}
         {trip.status === 'completed' && itineraries.length > 0 && (
           <div className="space-y-6">
-            {/* Option Tabs */}
-            <div className="flex gap-2 overflow-x-auto pb-2">
-              {itineraries.map((itinerary) => (
-                <button
-                  key={itinerary.id}
-                  onClick={() => setSelectedOption(itinerary.option_index)}
-                  className={`flex-shrink-0 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
-                    selectedOption === itinerary.option_index
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-secondary hover:bg-secondary/80 text-secondary-foreground'
-                  }`}
-                >
-                  {itinerary.is_best_option && <Star className="w-4 h-4 inline mr-1" />}
-                  Option {itinerary.option_index}
-                </button>
-              ))}
+            {/* Compare CTA + Option Tabs */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex gap-2 overflow-x-auto pb-2">
+                {itineraries.map((itinerary) => (
+                  <button
+                    key={itinerary.id}
+                    onClick={() => setSelectedOption(itinerary.option_index)}
+                    className={`flex-shrink-0 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                      selectedOption === itinerary.option_index
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-secondary hover:bg-secondary/80 text-secondary-foreground'
+                    }`}
+                  >
+                    {itinerary.is_best_option && <Star className="w-4 h-4 inline mr-1" />}
+                    Option {itinerary.option_index}
+                  </button>
+                ))}
+              </div>
+              <Button variant="outline" size="sm" asChild className="flex-shrink-0">
+                <Link to={`/app/trip/${id}/compare`}>
+                  Compare All
+                </Link>
+              </Button>
             </div>
 
             {/* Selected Itinerary Detail */}
