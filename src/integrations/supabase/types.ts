@@ -343,6 +343,41 @@ export type Database = {
           },
         ]
       }
+      trip_share_tokens: {
+        Row: {
+          created_at: string
+          created_by: string
+          expires_at: string | null
+          id: string
+          token: string
+          trip_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          expires_at?: string | null
+          id?: string
+          token: string
+          trip_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          expires_at?: string | null
+          id?: string
+          token?: string
+          trip_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_share_tokens_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trips: {
         Row: {
           adults_count: number | null
@@ -429,7 +464,40 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_shared_itinerary: {
+        Args: { share_token: string }
+        Returns: {
+          cons: string[]
+          days: Json
+          disclaimers: Json
+          general_tips: Json
+          id: string
+          is_best_option: boolean
+          option_index: number
+          option_label: string
+          pace: string
+          pros: string[]
+          recommended: boolean
+          summary: string
+          title: string
+          total_cost_max: number
+          total_cost_min: number
+          trip_id: string
+          why_good_for_you: string
+        }[]
+      }
+      get_shared_trip: {
+        Args: { share_token: string }
+        Returns: {
+          budget_inr: number
+          destination: string
+          end_date: string
+          is_family: boolean
+          selected_itinerary_id: string
+          start_date: string
+          trip_id: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

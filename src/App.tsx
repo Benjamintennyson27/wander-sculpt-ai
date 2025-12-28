@@ -12,6 +12,7 @@ import NewTrip from "./pages/NewTrip";
 import TripDetail from "./pages/TripDetail";
 import TripCompare from "./pages/TripCompare";
 import Terms from "./pages/Terms";
+import ShareTrip from "./pages/ShareTrip";
 import NotFound from "./pages/NotFound";
 
 // Development-only debug page
@@ -52,6 +53,8 @@ const App = () => (
                 <TripCompare />
               </ProtectedRoute>
             } />
+            {/* Public share route - no auth required */}
+            <Route path="/share/:token" element={<ShareTrip />} />
             {/* Development-only debug route */}
             {import.meta.env.DEV && (
               <Route path="/debug-rls" element={<DebugRLS />} />
