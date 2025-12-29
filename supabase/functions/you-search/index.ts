@@ -115,15 +115,15 @@ Deno.serve(async (req) => {
 
     console.log('Cache miss, calling You.com API...');
 
-    // Call You.com Search API
-    const youApiUrl = new URL('https://api.ydc-index.io/search');
+    // Call You.com Search API (correct v1 endpoint)
+    const youApiUrl = new URL('https://ydc-index.io/v1/search');
     youApiUrl.searchParams.set('query', query);
+    youApiUrl.searchParams.set('count', '5');
     
     const youResponse = await fetch(youApiUrl.toString(), {
       method: 'GET',
       headers: {
         'X-API-Key': YOU_API_KEY,
-        'Content-Type': 'application/json',
       },
     });
 
@@ -139,22 +139,22 @@ Deno.serve(async (req) => {
     const youData = await youResponse.json();
     console.log('You.com API response received');
 
-    // Normalize response - extract top 5 results
+    // Normalize response - extract top 5 results from v1 API format
     const results: SearchResult[] = [];
     
-    // You.com returns hits array with nested structures
-    const hits = youData.hits || [];
-    for (const hit of hits.slice(0, 5)) {
-      // Each hit can have multiple snippets
-      const snippets = hit.snippets || [];
-      const title = hit.title || '';
-      const url = hit.url || '';
+    // You.com v1 API returns results.web array
+    const webResults = youData.results?.web || youData.hits || [];
+    for (const item of webResults.slice(0, 5)) {
+      const snippets = item.snippets || [];
+      const title = item.title || '';
+      const url = item.url || '';
+      const description = item.description || '';
       
       if (title && url) {
         results.push({
           title,
           url,
-          snippet: snippets[0] || hit.description || ''
+          snippet: snippets[0] || description || ''
         });
       }
     }
