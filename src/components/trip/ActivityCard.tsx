@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, forwardRef } from 'react';
 import { MapPin, Clock, Utensils, Users, AlertTriangle, ExternalLink, BadgeCheck, ChevronDown, ChevronUp, Timer, Ban, IndianRupee } from 'lucide-react';
 import { ItineraryItem } from '@/lib/itinerary-adapter';
 import { cn } from '@/lib/utils';
@@ -39,30 +39,32 @@ const timeBlockColors = {
   },
 };
 
-export function ActivityCard({ item, index, isSelected, onSelect, timeBlock }: ActivityCardProps) {
-  const [sourcesOpen, setSourcesOpen] = useState(false);
-  const colors = timeBlockColors[timeBlock];
-  
-  const mapsUrl = item.maps_query 
-    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.maps_query)}`
-    : null;
+export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
+  function ActivityCard({ item, index, isSelected, onSelect, timeBlock }, ref) {
+    const [sourcesOpen, setSourcesOpen] = useState(false);
+    const colors = timeBlockColors[timeBlock];
+    
+    const mapsUrl = item.maps_query 
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.maps_query)}`
+      : null;
 
-  const facts = item.verified_facts;
-  const hasVerifiedData = facts && (facts.verified_note || facts.hours_text || facts.price_text || facts.closed_day_text);
-  const hasSources = facts?.sources && facts.sources.length > 0;
+    const facts = item.verified_facts;
+    const hasVerifiedData = facts && (facts.verified_note || facts.hours_text || facts.price_text || facts.closed_day_text);
+    const hasSources = facts?.sources && facts.sources.length > 0;
 
-  return (
-    <div
-      id={`activity-${index}`}
-      onClick={onSelect}
-      className={cn(
-        'group relative p-4 rounded-xl transition-all duration-300 cursor-pointer',
-        'bg-card/50 backdrop-blur-sm border border-border/50',
-        colors.glow,
-        isSelected && `ring-2 ring-primary/50 ${colors.bg} ${colors.border}`,
-        !isSelected && 'hover:bg-card/70 hover:border-border'
-      )}
-    >
+    return (
+      <div
+        ref={ref}
+        id={`activity-${index}`}
+        onClick={onSelect}
+        className={cn(
+          'group relative p-4 rounded-xl transition-all duration-300 cursor-pointer',
+          'bg-card/50 backdrop-blur-sm border border-border/50',
+          colors.glow,
+          isSelected && `ring-2 ring-primary/50 ${colors.bg} ${colors.border}`,
+          !isSelected && 'hover:bg-card/70 hover:border-border'
+        )}
+      >
       {/* Glow effect on hover */}
       <div className={cn(
         'absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300',
@@ -227,7 +229,8 @@ export function ActivityCard({ item, index, isSelected, onSelect, timeBlock }: A
         {!hasVerifiedData && !hasSources && facts === null && (
           <p className="text-xs text-muted-foreground/60 italic">Limited verified information available</p>
         )}
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+);

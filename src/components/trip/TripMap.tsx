@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState, forwardRef } from 'react';
 import { ItineraryDay, ItineraryItem } from '@/lib/itinerary-adapter';
 import { cn } from '@/lib/utils';
 import { MapPin, Navigation } from 'lucide-react';
@@ -18,8 +18,9 @@ const timeBlockPinColors = {
   night: { bg: '#60a5fa', border: '#3b82f6' },      // blue
 };
 
-export function TripMap({ day, selectedActivityIndex, onPinClick, className }: TripMapProps) {
-  const mapRef = useRef<HTMLDivElement>(null);
+export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
+  function TripMap({ day, selectedActivityIndex, onPinClick, className }, ref) {
+    const mapRef = useRef<HTMLDivElement>(null);
   const [hoveredPin, setHoveredPin] = useState<number | null>(null);
   
   // Flatten activities with their indices
@@ -52,34 +53,37 @@ export function TripMap({ day, selectedActivityIndex, onPinClick, className }: T
     };
   };
 
-  if (!day || activities.length === 0) {
-    return (
-      <div className={cn(
-        'relative rounded-2xl overflow-hidden',
-        'bg-card/50 backdrop-blur-xl border border-border/50',
-        'flex items-center justify-center',
-        className
-      )}>
-        <div className="text-center p-8">
-          <div className="w-16 h-16 rounded-2xl bg-secondary/50 flex items-center justify-center mx-auto mb-4">
-            <MapPin className="w-8 h-8 text-muted-foreground" />
+    if (!day || activities.length === 0) {
+      return (
+        <div 
+          ref={ref}
+          className={cn(
+            'relative rounded-2xl overflow-hidden',
+            'bg-card/50 backdrop-blur-xl border border-border/50',
+            'flex items-center justify-center',
+            className
+          )}
+        >
+          <div className="text-center p-8">
+            <div className="w-16 h-16 rounded-2xl bg-secondary/50 flex items-center justify-center mx-auto mb-4">
+              <MapPin className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <p className="text-muted-foreground">Select a day to view locations</p>
           </div>
-          <p className="text-muted-foreground">Select a day to view locations</p>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  return (
-    <div 
-      ref={mapRef}
-      className={cn(
-        'relative rounded-2xl overflow-hidden',
-        'bg-gradient-to-br from-card/80 via-card/60 to-card/40',
-        'backdrop-blur-xl border border-border/50',
-        className
-      )}
-    >
+    return (
+      <div 
+        ref={ref}
+        className={cn(
+          'relative rounded-2xl overflow-hidden',
+          'bg-gradient-to-br from-card/80 via-card/60 to-card/40',
+          'backdrop-blur-xl border border-border/50',
+          className
+        )}
+      >
       {/* Map background pattern */}
       <div className="absolute inset-0 opacity-20">
         <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
@@ -212,8 +216,9 @@ export function TripMap({ day, selectedActivityIndex, onPinClick, className }: T
               <span className="text-xs text-muted-foreground capitalize">{block}</span>
             </div>
           ))}
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+);
