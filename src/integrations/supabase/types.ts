@@ -176,6 +176,39 @@ export type Database = {
           },
         ]
       }
+      itinerary_item_facts: {
+        Row: {
+          closed_day_text: string | null
+          created_at: string
+          hours_text: string | null
+          id: string
+          itinerary_item_id: string
+          price_text: string | null
+          sources: Json | null
+          verified_note: string | null
+        }
+        Insert: {
+          closed_day_text?: string | null
+          created_at?: string
+          hours_text?: string | null
+          id?: string
+          itinerary_item_id: string
+          price_text?: string | null
+          sources?: Json | null
+          verified_note?: string | null
+        }
+        Update: {
+          closed_day_text?: string | null
+          created_at?: string
+          hours_text?: string | null
+          id?: string
+          itinerary_item_id?: string
+          price_text?: string | null
+          sources?: Json | null
+          verified_note?: string | null
+        }
+        Relationships: []
+      }
       itinerary_items: {
         Row: {
           assumptions: string | null
@@ -508,6 +541,54 @@ export type Database = {
           travel_style?: string | null
           travelers?: Json | null
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      you_search_cache: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          query: string
+          query_hash: string
+          results: Json
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          query: string
+          query_hash: string
+          results?: Json
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          query?: string
+          query_hash?: string
+          results?: Json
+        }
+        Relationships: []
+      }
+      you_search_rate_limits: {
+        Row: {
+          date: string
+          id: string
+          search_count: number
+          user_id: string
+        }
+        Insert: {
+          date?: string
+          id?: string
+          search_count?: number
+          user_id: string
+        }
+        Update: {
+          date?: string
+          id?: string
+          search_count?: number
           user_id?: string
         }
         Relationships: []

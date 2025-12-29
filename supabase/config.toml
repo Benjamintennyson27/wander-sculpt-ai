@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.enrich-destination]
 verify_jwt = false
+
+[functions.you-search]
+verify_jwt = false
+
+[functions.enrich-itinerary]
+verify_jwt = false

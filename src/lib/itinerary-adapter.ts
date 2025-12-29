@@ -1,6 +1,14 @@
 // Shared itinerary data types and adapter for TripDetail and TripCompare
 // Data is stored in itineraries.days JSONB column
 
+export interface VerifiedFacts {
+  verified_note?: string | null;
+  hours_text?: string | null;
+  price_text?: string | null;
+  closed_day_text?: string | null;
+  sources?: Array<{ title: string; url: string; snippet: string }>;
+}
+
 export interface ItineraryItem {
   title: string;
   description?: string;
@@ -13,6 +21,8 @@ export interface ItineraryItem {
   food_related?: boolean;
   transit_tip?: string;
   assumptions?: string;
+  maps_query?: string;
+  verified_facts?: VerifiedFacts;
 }
 
 export interface ItineraryDay {
@@ -74,6 +84,8 @@ export function parseItinerary(raw: any): Itinerary {
       food_related: item.food_related || false,
       transit_tip: item.transit_tip || '',
       assumptions: item.assumptions || '',
+      maps_query: item.maps_query || '',
+      verified_facts: item.verified_facts || null,
     })) : [],
   }));
 

@@ -10,7 +10,7 @@ import {
   ArrowLeft, Star, RefreshCw, Check, MapPin, 
   Calendar, Clock, Utensils, Lightbulb, AlertTriangle,
   Loader2, ChevronDown, ChevronUp, Users, IndianRupee,
-  Share2, Copy, Link as LinkIcon, Wallet, Map as MapIcon, X
+  Share2, Copy, Link as LinkIcon, Wallet, Map as MapIcon, X, BadgeCheck
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { 
@@ -37,6 +37,7 @@ export default function TripDetail() {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [creatingShare, setCreatingShare] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [enriching, setEnriching] = useState(false);
   
   // New state for Timeline + Map layout
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(0);
@@ -115,6 +116,32 @@ export default function TripDetail() {
       });
     } finally {
       setRegenerating(false);
+    }
+  };
+
+  const handleEnrichFacts = async () => {
+    const currentIt = itineraries.find(it => it.option_index === selectedOption);
+    if (!currentIt) return;
+
+    setEnriching(true);
+    try {
+      const { error } = await supabase.functions.invoke('enrich-itinerary', {
+        body: { trip_id: id, option_id: currentIt.id }
+      });
+
+      if (error) throw error;
+
+      toast({ title: 'Facts verified!', description: 'Itinerary enriched with real-world data.' });
+      fetchTrip();
+    } catch (error) {
+      console.error('Enrichment error:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Verification failed',
+        description: 'Could not fetch verified facts. Try again later.'
+      });
+    } finally {
+      setEnriching(false);
     }
   };
 
@@ -310,6 +337,23 @@ export default function TripDetail() {
             >
               <MapIcon className="w-4 h-4 mr-2" />
               Show Map
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleEnrichFacts}
+              disabled={enriching || trip.status === 'generating'}
+              className="hidden sm:flex"
+            >
+              {enriching ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <BadgeCheck className="w-4 h-4 mr-2" />
+                  Verify Facts
+                </>
+              )}
             </Button>
             
             <Button
