@@ -65,170 +65,170 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
           !isSelected && 'hover:bg-card/70 hover:border-border'
         )}
       >
-      {/* Glow effect on hover */}
-      <div className={cn(
-        'absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300',
-        'group-hover:opacity-100',
-        colors.bg
-      )} />
-      
-      <div className="relative space-y-3">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h5 className="font-medium text-foreground leading-tight">{item.title}</h5>
-              {hasVerifiedData && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-medium">
-                  <BadgeCheck className="w-3 h-3" />
-                  Verified
+        {/* Glow effect on hover */}
+        <div className={cn(
+          'absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300',
+          'group-hover:opacity-100',
+          colors.bg
+        )} />
+        
+        <div className="relative space-y-3">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <h5 className="font-medium text-foreground leading-tight">{item.title}</h5>
+                {hasVerifiedData && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-medium">
+                    <BadgeCheck className="w-3 h-3" />
+                    Verified
+                  </span>
+                )}
+              </div>
+              {item.location_area && (
+                <p className={cn('text-sm mt-1 flex items-center gap-1.5', colors.accent)}>
+                  <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span className="truncate">{item.location_area}</span>
+                </p>
+              )}
+            </div>
+            
+            {/* Cost badge */}
+            {((item.cost_min && item.cost_min > 0) || (item.cost_max && item.cost_max > 0)) && (
+              <div className="flex-shrink-0 px-2.5 py-1 rounded-lg bg-secondary/80 text-xs font-medium text-foreground">
+                ₹{item.cost_min || 0} - ₹{item.cost_max || 0}
+              </div>
+            )}
+          </div>
+
+          {/* Description */}
+          {item.description && (
+            <p className="text-sm text-muted-foreground line-clamp-2">{item.description}</p>
+          )}
+
+          {/* Verified Facts Chips */}
+          {hasVerifiedData && (
+            <div className="flex flex-wrap gap-2">
+              {facts.hours_text && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-400">
+                  <Timer className="w-3 h-3" />
+                  {facts.hours_text.length > 40 ? facts.hours_text.slice(0, 37) + '...' : facts.hours_text}
+                </span>
+              )}
+              {facts.price_text && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-green-500/10 border border-green-500/20 text-xs text-green-400">
+                  <IndianRupee className="w-3 h-3" />
+                  {facts.price_text.length > 40 ? facts.price_text.slice(0, 37) + '...' : facts.price_text}
+                </span>
+              )}
+              {facts.closed_day_text && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+                  <Ban className="w-3 h-3" />
+                  {facts.closed_day_text}
                 </span>
               )}
             </div>
-            {item.location_area && (
-              <p className={cn('text-sm mt-1 flex items-center gap-1.5', colors.accent)}>
-                <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
-                <span className="truncate">{item.location_area}</span>
-              </p>
+          )}
+
+          {/* Verified Note */}
+          {facts?.verified_note && (
+            <p className="text-sm text-muted-foreground italic border-l-2 border-emerald-500/30 pl-3">
+              {facts.verified_note}
+            </p>
+          )}
+
+          {/* Meta row */}
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            {item.duration_minutes && item.duration_minutes > 0 && (
+              <span className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" />
+                {item.duration_minutes} min
+              </span>
+            )}
+            {item.food_related && (
+              <span className="flex items-center gap-1.5 text-orange-400">
+                <Utensils className="w-3.5 h-3.5" />
+                Food
+              </span>
+            )}
+            {item.kid_friendly && (
+              <span className="flex items-center gap-1.5 text-blue-400">
+                <Users className="w-3.5 h-3.5" />
+                Kid-friendly
+              </span>
+            )}
+            
+            {mapsUrl && (
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className={cn(
+                  'flex items-center gap-1.5 ml-auto',
+                  'px-2.5 py-1 rounded-lg',
+                  'bg-primary/10 text-primary',
+                  'hover:bg-primary/20 transition-colors'
+                )}
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Open in Maps
+              </a>
             )}
           </div>
-          
-          {/* Cost badge */}
-          {((item.cost_min && item.cost_min > 0) || (item.cost_max && item.cost_max > 0)) && (
-            <div className="flex-shrink-0 px-2.5 py-1 rounded-lg bg-secondary/80 text-xs font-medium text-foreground">
-              ₹{item.cost_min || 0} - ₹{item.cost_max || 0}
+
+          {/* Transit tip */}
+          {item.transit_tip && (
+            <div className="p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20">
+              <p className="text-xs text-blue-400">🚗 {item.transit_tip}</p>
             </div>
           )}
-        </div>
 
-        {/* Description */}
-        {item.description && (
-          <p className="text-sm text-muted-foreground line-clamp-2">{item.description}</p>
-        )}
-
-        {/* Verified Facts Chips */}
-        {hasVerifiedData && (
-          <div className="flex flex-wrap gap-2">
-            {facts.hours_text && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-400">
-                <Timer className="w-3 h-3" />
-                {facts.hours_text.length > 40 ? facts.hours_text.slice(0, 37) + '...' : facts.hours_text}
-              </span>
-            )}
-            {facts.price_text && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-green-500/10 border border-green-500/20 text-xs text-green-400">
-                <IndianRupee className="w-3 h-3" />
-                {facts.price_text.length > 40 ? facts.price_text.slice(0, 37) + '...' : facts.price_text}
-              </span>
-            )}
-            {facts.closed_day_text && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
-                <Ban className="w-3 h-3" />
-                {facts.closed_day_text}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Verified Note */}
-        {facts?.verified_note && (
-          <p className="text-sm text-muted-foreground italic border-l-2 border-emerald-500/30 pl-3">
-            {facts.verified_note}
-          </p>
-        )}
-
-        {/* Meta row */}
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          {item.duration_minutes && item.duration_minutes > 0 && (
-            <span className="flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5" />
-              {item.duration_minutes} min
-            </span>
+          {/* Assumptions warning */}
+          {item.assumptions && (
+            <div className="p-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20 flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 text-yellow-400 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-yellow-400">{item.assumptions}</p>
+            </div>
           )}
-          {item.food_related && (
-            <span className="flex items-center gap-1.5 text-orange-400">
-              <Utensils className="w-3.5 h-3.5" />
-              Food
-            </span>
+
+          {/* Sources Collapsible */}
+          {hasSources && (
+            <Collapsible open={sourcesOpen} onOpenChange={setSourcesOpen}>
+              <CollapsibleTrigger 
+                onClick={(e) => e.stopPropagation()}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {sourcesOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                {facts.sources!.length} source{facts.sources!.length !== 1 ? 's' : ''}
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-2">
+                <div className="space-y-1.5 pl-1">
+                  {facts.sources!.map((source, idx) => (
+                    <a
+                      key={idx}
+                      href={source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex items-start gap-2 p-2 rounded-lg bg-secondary/50 hover:bg-secondary/80 transition-colors text-xs"
+                    >
+                      <ExternalLink className="w-3 h-3 mt-0.5 flex-shrink-0 text-primary" />
+                      <div className="min-w-0">
+                        <div className="font-medium text-foreground truncate">{source.title}</div>
+                        <div className="text-muted-foreground line-clamp-2">{source.snippet}</div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           )}
-          {item.kid_friendly && (
-            <span className="flex items-center gap-1.5 text-blue-400">
-              <Users className="w-3.5 h-3.5" />
-              Kid-friendly
-            </span>
+
+          {/* No verified data message */}
+          {!hasVerifiedData && !hasSources && facts === null && (
+            <p className="text-xs text-muted-foreground/60 italic">Limited verified information available</p>
           )}
-          
-          {mapsUrl && (
-            <a
-              href={mapsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className={cn(
-                'flex items-center gap-1.5 ml-auto',
-                'px-2.5 py-1 rounded-lg',
-                'bg-primary/10 text-primary',
-                'hover:bg-primary/20 transition-colors'
-              )}
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              Open in Maps
-            </a>
-          )}
-        </div>
-
-        {/* Transit tip */}
-        {item.transit_tip && (
-          <div className="p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20">
-            <p className="text-xs text-blue-400">🚗 {item.transit_tip}</p>
-          </div>
-        )}
-
-        {/* Assumptions warning */}
-        {item.assumptions && (
-          <div className="p-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20 flex items-start gap-2">
-            <AlertTriangle className="w-3.5 h-3.5 text-yellow-400 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-yellow-400">{item.assumptions}</p>
-          </div>
-        )}
-
-        {/* Sources Collapsible */}
-        {hasSources && (
-          <Collapsible open={sourcesOpen} onOpenChange={setSourcesOpen}>
-            <CollapsibleTrigger 
-              onClick={(e) => e.stopPropagation()}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              {sourcesOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-              {facts.sources!.length} source{facts.sources!.length !== 1 ? 's' : ''}
-            </CollapsibleTrigger>
-            <CollapsibleContent className="mt-2">
-              <div className="space-y-1.5 pl-1">
-                {facts.sources!.map((source, idx) => (
-                  <a
-                    key={idx}
-                    href={source.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex items-start gap-2 p-2 rounded-lg bg-secondary/50 hover:bg-secondary/80 transition-colors text-xs"
-                  >
-                    <ExternalLink className="w-3 h-3 mt-0.5 flex-shrink-0 text-primary" />
-                    <div className="min-w-0">
-                      <div className="font-medium text-foreground truncate">{source.title}</div>
-                      <div className="text-muted-foreground line-clamp-2">{source.snippet}</div>
-                    </div>
-                  </a>
-                ))}
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        )}
-
-        {/* No verified data message */}
-        {!hasVerifiedData && !hasSources && facts === null && (
-          <p className="text-xs text-muted-foreground/60 italic">Limited verified information available</p>
-        )}
         </div>
       </div>
     );
