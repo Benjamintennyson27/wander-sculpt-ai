@@ -271,6 +271,62 @@ export type Database = {
           },
         ]
       }
+      place_verifications: {
+        Row: {
+          address: string | null
+          best_name: string | null
+          created_at: string
+          id: string
+          itinerary_item_id: string
+          lat: number | null
+          lng: number | null
+          quality_score: number
+          query: string
+          reasoning: string | null
+          sources: Json
+          status: string
+          trip_id: string
+        }
+        Insert: {
+          address?: string | null
+          best_name?: string | null
+          created_at?: string
+          id?: string
+          itinerary_item_id: string
+          lat?: number | null
+          lng?: number | null
+          quality_score?: number
+          query: string
+          reasoning?: string | null
+          sources?: Json
+          status?: string
+          trip_id: string
+        }
+        Update: {
+          address?: string | null
+          best_name?: string | null
+          created_at?: string
+          id?: string
+          itinerary_item_id?: string
+          lat?: number | null
+          lng?: number | null
+          quality_score?: number
+          query?: string
+          reasoning?: string | null
+          sources?: Json
+          status?: string
+          trip_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "place_verifications_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       preferences: {
         Row: {
           created_at: string
@@ -424,6 +480,76 @@ export type Database = {
             foreignKeyName: "trip_messages_trip_id_fkey"
             columns: ["trip_id"]
             isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trip_places: {
+        Row: {
+          created_at: string
+          id: string
+          lat: number
+          lng: number
+          metadata: Json
+          name: string
+          source: string
+          trip_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          lat: number
+          lng: number
+          metadata?: Json
+          name: string
+          source?: string
+          trip_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          lat?: number
+          lng?: number
+          metadata?: Json
+          name?: string
+          source?: string
+          trip_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_places_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trip_settings: {
+        Row: {
+          auto_verify: boolean
+          created_at: string
+          trip_id: string
+          verify_mode: string
+        }
+        Insert: {
+          auto_verify?: boolean
+          created_at?: string
+          trip_id: string
+          verify_mode?: string
+        }
+        Update: {
+          auto_verify?: boolean
+          created_at?: string
+          trip_id?: string
+          verify_mode?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_settings_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: true
             referencedRelation: "trips"
             referencedColumns: ["id"]
           },

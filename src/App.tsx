@@ -11,6 +11,7 @@ import Dashboard from "./pages/Dashboard";
 import NewTrip from "./pages/NewTrip";
 import TripDetail from "./pages/TripDetail";
 import TripCompare from "./pages/TripCompare";
+import TripMapPage from "./pages/TripMapPage";
 import Terms from "./pages/Terms";
 import ShareTrip from "./pages/ShareTrip";
 import NotFound from "./pages/NotFound";
@@ -51,6 +52,11 @@ const App = () => (
             <Route path="/app/trip/:id/compare" element={
               <ProtectedRoute>
                 <TripCompare />
+              </ProtectedRoute>
+            } />
+            <Route path="/app/trip/:id/map" element={
+              <ProtectedRoute>
+                <TripMapPage />
               </ProtectedRoute>
             } />
             {/* Public share route - no auth required */}
