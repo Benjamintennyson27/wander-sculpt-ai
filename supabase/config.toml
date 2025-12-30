@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.enrich-itinerary]
 verify_jwt = false
+
+[functions.verify-place]
+verify_jwt = false
+
+[functions.verify-trip-places]
+verify_jwt = false
