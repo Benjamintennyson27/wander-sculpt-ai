@@ -15,34 +15,38 @@ const blockConfig = {
   morning: {
     icon: Sun,
     label: 'Morning',
-    time: '6 AM - 12 PM',
-    gradient: 'from-amber-500/20 to-amber-500/5',
+    time: '6 AM – 12 PM',
+    gradient: 'from-amber-500/15 to-transparent',
     iconColor: 'text-amber-400',
-    lineColor: 'bg-amber-500/30',
+    lineColor: 'bg-amber-500/40',
+    dotColor: 'bg-amber-400',
   },
   afternoon: {
     icon: Sunset,
     label: 'Afternoon',
-    time: '12 PM - 5 PM',
-    gradient: 'from-orange-500/20 to-orange-500/5',
+    time: '12 PM – 5 PM',
+    gradient: 'from-orange-500/15 to-transparent',
     iconColor: 'text-orange-400',
-    lineColor: 'bg-orange-500/30',
+    lineColor: 'bg-orange-500/40',
+    dotColor: 'bg-orange-400',
   },
   evening: {
     icon: CloudMoon,
     label: 'Evening',
-    time: '5 PM - 9 PM',
-    gradient: 'from-purple-500/20 to-purple-500/5',
-    iconColor: 'text-purple-400',
-    lineColor: 'bg-purple-500/30',
+    time: '5 PM – 9 PM',
+    gradient: 'from-cyan-500/15 to-transparent',
+    iconColor: 'text-cyan-400',
+    lineColor: 'bg-cyan-500/40',
+    dotColor: 'bg-cyan-400',
   },
   night: {
     icon: Moon,
     label: 'Night',
     time: '9 PM onwards',
-    gradient: 'from-blue-500/20 to-blue-500/5',
+    gradient: 'from-blue-500/15 to-transparent',
     iconColor: 'text-blue-400',
-    lineColor: 'bg-blue-500/30',
+    lineColor: 'bg-blue-500/40',
+    dotColor: 'bg-blue-400',
   },
 };
 
@@ -59,37 +63,28 @@ export function TimelineBlock({
   return (
     <div className="relative pl-8">
       {/* Vertical timeline line */}
-      <div className={cn(
-        'absolute left-3 top-0 bottom-0 w-0.5',
-        config.lineColor
-      )} />
+      <div className={cn('absolute left-3 top-0 bottom-0 w-px', config.lineColor)} />
 
       {/* Time block header with icon */}
-      <div className="relative mb-4">
+      <div className="relative mb-3">
         {/* Icon node on timeline */}
         <div className={cn(
           'absolute -left-8 top-0 w-6 h-6 rounded-full',
           'flex items-center justify-center',
-          'bg-card border-2 border-border',
+          'bg-card border border-border/50',
           config.iconColor
         )}>
           <Icon className="w-3.5 h-3.5" />
         </div>
         
-        <div className={cn(
-          'py-2 px-3 rounded-lg inline-flex items-center gap-2',
-          'bg-gradient-to-r',
-          config.gradient
-        )}>
-          <span className={cn('font-medium text-sm', config.iconColor)}>
-            {config.label}
-          </span>
+        <div className={cn('py-1.5 px-3 rounded-md inline-flex items-center gap-2 bg-gradient-to-r', config.gradient)}>
+          <span className={cn('font-medium text-sm', config.iconColor)}>{config.label}</span>
           <span className="text-xs text-muted-foreground">{config.time}</span>
         </div>
       </div>
 
       {/* Activities or empty state */}
-      <div className="space-y-3 pb-6">
+      <div className="space-y-2.5 pb-5">
         {items.length > 0 ? (
           items.map((item, idx) => {
             const globalIndex = startIndex + idx;
@@ -106,10 +101,10 @@ export function TimelineBlock({
           })
         ) : (
           <div className={cn(
-            'py-6 px-4 rounded-xl border border-dashed border-border/50',
-            'bg-card/30 text-center'
+            'py-4 px-4 rounded-lg border border-dashed border-border/40',
+            'bg-card/20 text-center'
           )}>
-            <p className="text-sm text-muted-foreground">Nothing planned yet</p>
+            <p className="text-xs text-muted-foreground">Nothing planned yet</p>
           </div>
         )}
       </div>
