@@ -1,7 +1,7 @@
 import { useState, forwardRef } from 'react';
 import { ItineraryDay, ItineraryItem } from '@/lib/itinerary-adapter';
 import { cn } from '@/lib/utils';
-import { MapPin, Navigation } from 'lucide-react';
+import { MapPin, Navigation, ExternalLink } from 'lucide-react';
 
 interface TripMapProps {
   day: ItineraryDay | null;
@@ -10,12 +10,12 @@ interface TripMapProps {
   className?: string;
 }
 
-// Colors for time blocks
+// Premium time block pin colors
 const timeBlockPinColors = {
-  morning: { bg: '#fbbf24', border: '#f59e0b' },    // amber
-  afternoon: { bg: '#fb923c', border: '#f97316' },  // orange
-  evening: { bg: '#a78bfa', border: '#8b5cf6' },    // purple
-  night: { bg: '#60a5fa', border: '#3b82f6' },      // blue
+  morning: { bg: '#d97706', border: '#b45309' },    // amber-600
+  afternoon: { bg: '#ea580c', border: '#c2410c' },  // orange-600
+  evening: { bg: '#0891b2', border: '#0e7490' },    // primary teal
+  night: { bg: '#2563eb', border: '#1d4ed8' },      // blue-600 (accent)
 };
 
 export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
@@ -40,9 +40,8 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
 
     // Position pins in a visually pleasing layout
     const getPinPosition = (index: number, total: number) => {
-      // Create a spiral-like pattern
       const angle = (index / total) * 2 * Math.PI + Math.PI / 4;
-      const radius = 25 + (index % 3) * 8;
+      const radius = 22 + (index % 3) * 7;
       const centerX = 50;
       const centerY = 50;
       
@@ -57,53 +56,54 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
         <div 
           ref={ref}
           className={cn(
-            'relative rounded-2xl overflow-hidden',
-            'bg-card/50 backdrop-blur-xl border border-border/50',
+            'relative rounded-xl overflow-hidden',
+            'bg-card/60 backdrop-blur-sm border border-border/50',
             'flex items-center justify-center',
             className
           )}
         >
           <div className="text-center p-8">
-            <div className="w-16 h-16 rounded-2xl bg-secondary/50 flex items-center justify-center mx-auto mb-4">
-              <MapPin className="w-8 h-8 text-muted-foreground" />
+            <div className="w-14 h-14 rounded-xl bg-secondary/50 flex items-center justify-center mx-auto mb-3">
+              <MapPin className="w-7 h-7 text-muted-foreground" />
             </div>
-            <p className="text-muted-foreground">Select a day to view locations</p>
+            <p className="text-sm text-muted-foreground">Select a day to view locations</p>
           </div>
         </div>
       );
     }
 
+    const selectedActivity = activities.find(a => a.index === selectedActivityIndex);
+
     return (
       <div 
         ref={ref}
         className={cn(
-          'relative rounded-2xl overflow-hidden',
-          'bg-gradient-to-br from-card/80 via-card/60 to-card/40',
-          'backdrop-blur-xl border border-border/50',
+          'relative rounded-xl overflow-hidden',
+          'bg-card/70 backdrop-blur-sm border border-border/50',
           className
         )}
       >
-        {/* Map background pattern */}
-        <div className="absolute inset-0 opacity-20">
+        {/* Subtle grid pattern */}
+        <div className="absolute inset-0 opacity-10">
           <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
             <defs>
-              <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-border" />
+              <pattern id="mapGrid" width="32" height="32" patternUnits="userSpaceOnUse">
+                <path d="M 32 0 L 0 0 0 32" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-border" />
               </pattern>
             </defs>
-            <rect width="100%" height="100%" fill="url(#grid)" />
+            <rect width="100%" height="100%" fill="url(#mapGrid)" />
           </svg>
         </div>
 
-        {/* Decorative elements */}
-        <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-secondary/80 backdrop-blur-sm">
-          <Navigation className="w-4 h-4 text-primary" />
-          <span className="text-sm font-medium">Day {day.day}</span>
+        {/* Day label */}
+        <div className="absolute top-3 left-3 flex items-center gap-2 px-2.5 py-1 rounded-md bg-card/90 backdrop-blur-sm border border-border/50">
+          <Navigation className="w-3.5 h-3.5 text-primary" />
+          <span className="text-xs font-medium">Day {day.day}</span>
         </div>
 
-        {/* Connection lines between pins */}
+        {/* Connection lines */}
         <svg className="absolute inset-0 w-full h-full pointer-events-none">
-          {activities.slice(0, -1).map((activity, idx) => {
+          {activities.slice(0, -1).map((_, idx) => {
             const pos1 = getPinPosition(idx, activities.length);
             const pos2 = getPinPosition(idx + 1, activities.length);
             return (
@@ -115,8 +115,8 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
                 y2={pos2.top}
                 stroke="hsl(var(--border))"
                 strokeWidth="1"
-                strokeDasharray="4 4"
-                opacity="0.5"
+                strokeDasharray="3 3"
+                opacity="0.4"
               />
             );
           })}
@@ -137,60 +137,56 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
               onMouseLeave={() => setHoveredPin(null)}
               className={cn(
                 'absolute transform -translate-x-1/2 -translate-y-1/2',
-                'transition-all duration-300 ease-out',
+                'transition-all duration-200 ease-out',
                 'group z-10',
-                isSelected && 'z-20 scale-125',
-                isHovered && !isSelected && 'scale-110'
+                isSelected && 'z-20 scale-110',
+                isHovered && !isSelected && 'scale-105'
               )}
               style={{
                 left: position.left,
                 top: position.top,
               }}
             >
-              {/* Pin shadow */}
-              <div 
-                className={cn(
-                  'absolute inset-0 rounded-full blur-md transition-opacity',
-                  isSelected ? 'opacity-80' : 'opacity-0 group-hover:opacity-40'
-                )}
-                style={{ backgroundColor: colors.bg }}
-              />
+              {/* Pin glow */}
+              {isSelected && (
+                <div 
+                  className="absolute inset-0 rounded-full blur-md opacity-50"
+                  style={{ backgroundColor: colors.bg }}
+                />
+              )}
               
               {/* Pin marker */}
               <div 
                 className={cn(
-                  'relative w-10 h-10 rounded-full',
+                  'relative w-8 h-8 rounded-full',
                   'flex items-center justify-center',
-                  'border-2 shadow-lg',
-                  'transition-all duration-300'
+                  'border-2 shadow-md',
+                  'transition-all duration-200'
                 )}
                 style={{
                   backgroundColor: colors.bg,
                   borderColor: colors.border,
-                  boxShadow: isSelected 
-                    ? `0 0 20px ${colors.bg}80, 0 4px 12px rgba(0,0,0,0.3)`
-                    : '0 2px 8px rgba(0,0,0,0.3)',
                 }}
               >
-                <span className="text-sm font-bold text-background">
+                <span className="text-xs font-bold text-white">
                   {idx + 1}
                 </span>
               </div>
 
-              {/* Tooltip */}
+              {/* Tooltip on hover */}
               {(isHovered || isSelected) && (
                 <div className={cn(
                   'absolute top-full left-1/2 -translate-x-1/2 mt-2',
-                  'px-3 py-2 rounded-lg',
+                  'px-3 py-2 rounded-md',
                   'bg-popover/95 backdrop-blur-sm border border-border',
-                  'shadow-xl min-w-[150px] max-w-[200px]',
+                  'shadow-lg min-w-[140px] max-w-[180px]',
                   'animate-fade-in z-30'
                 )}>
-                  <p className="text-sm font-medium text-foreground truncate">
+                  <p className="text-xs font-medium text-foreground truncate">
                     {activity.item.title}
                   </p>
                   {activity.item.location_area && (
-                    <p className="text-xs text-muted-foreground truncate mt-0.5">
+                    <p className="text-[10px] text-muted-foreground truncate mt-0.5">
                       {activity.item.location_area}
                     </p>
                   )}
@@ -200,22 +196,49 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
           );
         })}
 
-        {/* Legend */}
-        <div className="absolute bottom-4 left-4 right-4">
-          <div className="flex flex-wrap gap-2 justify-center">
-            {Object.entries(timeBlockPinColors).map(([block, colors]) => (
-              <div 
-                key={block}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-secondary/60 backdrop-blur-sm"
-              >
-                <div 
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: colors.bg }}
-                />
-                <span className="text-xs text-muted-foreground capitalize">{block}</span>
+        {/* Selected pin detail bottom sheet */}
+        {selectedActivity && (
+          <div className="absolute bottom-3 left-3 right-3 p-3 rounded-lg bg-popover/95 backdrop-blur-sm border border-border animate-fade-in">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-sm text-foreground truncate">
+                  {selectedActivity.item.title}
+                </p>
+                {selectedActivity.item.location_area && (
+                  <p className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-1">
+                    <MapPin className="w-3 h-3" />
+                    {selectedActivity.item.location_area}
+                  </p>
+                )}
               </div>
-            ))}
+              {selectedActivity.item.maps_query && (
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedActivity.item.maps_query)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-shrink-0 p-1.5 rounded-md bg-primary/10 hover:bg-primary/20 transition-colors"
+                >
+                  <ExternalLink className="w-4 h-4 text-primary" />
+                </a>
+              )}
+            </div>
           </div>
+        )}
+
+        {/* Legend */}
+        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap justify-center gap-2" style={{ bottom: selectedActivity ? '70px' : '12px' }}>
+          {Object.entries(timeBlockPinColors).map(([block, colors]) => (
+            <div 
+              key={block}
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-card/80 backdrop-blur-sm"
+            >
+              <div 
+                className="w-2.5 h-2.5 rounded-full"
+                style={{ backgroundColor: colors.bg }}
+              />
+              <span className="text-[10px] text-muted-foreground capitalize">{block}</span>
+            </div>
+          ))}
         </div>
       </div>
     );
