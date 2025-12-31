@@ -1,4 +1,4 @@
-import { Sun, Sunset, Moon, CloudMoon } from 'lucide-react';
+import { Sun, Sunset, Moon, CloudMoon, Plus } from 'lucide-react';
 import { ItineraryItem } from '@/lib/itinerary-adapter';
 import { ActivityCard } from './ActivityCard';
 import { cn } from '@/lib/utils';
@@ -15,34 +15,38 @@ const blockConfig = {
   morning: {
     icon: Sun,
     label: 'Morning',
-    time: '6 AM - 12 PM',
-    gradient: 'from-amber-500/20 to-amber-500/5',
-    iconColor: 'text-amber-400',
+    time: '6 AM – 12 PM',
+    bg: 'bg-amber-500/8',
+    iconColor: 'text-amber-500',
     lineColor: 'bg-amber-500/30',
+    dotBg: 'bg-amber-500/20',
   },
   afternoon: {
     icon: Sunset,
     label: 'Afternoon',
-    time: '12 PM - 5 PM',
-    gradient: 'from-orange-500/20 to-orange-500/5',
-    iconColor: 'text-orange-400',
+    time: '12 PM – 5 PM',
+    bg: 'bg-orange-500/8',
+    iconColor: 'text-orange-500',
     lineColor: 'bg-orange-500/30',
+    dotBg: 'bg-orange-500/20',
   },
   evening: {
     icon: CloudMoon,
     label: 'Evening',
-    time: '5 PM - 9 PM',
-    gradient: 'from-purple-500/20 to-purple-500/5',
-    iconColor: 'text-purple-400',
-    lineColor: 'bg-purple-500/30',
+    time: '5 PM – 9 PM',
+    bg: 'bg-primary/8',
+    iconColor: 'text-primary',
+    lineColor: 'bg-primary/30',
+    dotBg: 'bg-primary/20',
   },
   night: {
     icon: Moon,
     label: 'Night',
     time: '9 PM onwards',
-    gradient: 'from-blue-500/20 to-blue-500/5',
-    iconColor: 'text-blue-400',
-    lineColor: 'bg-blue-500/30',
+    bg: 'bg-accent/8',
+    iconColor: 'text-accent',
+    lineColor: 'bg-accent/30',
+    dotBg: 'bg-accent/20',
   },
 };
 
@@ -60,26 +64,25 @@ export function TimelineBlock({
     <div className="relative pl-8">
       {/* Vertical timeline line */}
       <div className={cn(
-        'absolute left-3 top-0 bottom-0 w-0.5',
+        'absolute left-[11px] top-0 bottom-0 w-[2px] rounded-full',
         config.lineColor
       )} />
 
-      {/* Time block header with icon */}
-      <div className="relative mb-4">
-        {/* Icon node on timeline */}
+      {/* Time block header */}
+      <div className="relative mb-3">
+        {/* Dot on timeline */}
         <div className={cn(
-          'absolute -left-8 top-0 w-6 h-6 rounded-full',
+          'absolute -left-8 top-0.5 w-6 h-6 rounded-full',
           'flex items-center justify-center',
-          'bg-card border-2 border-border',
-          config.iconColor
+          'bg-card border border-border',
+          config.dotBg
         )}>
-          <Icon className="w-3.5 h-3.5" />
+          <Icon className={cn('w-3.5 h-3.5', config.iconColor)} />
         </div>
         
         <div className={cn(
-          'py-2 px-3 rounded-lg inline-flex items-center gap-2',
-          'bg-gradient-to-r',
-          config.gradient
+          'inline-flex items-center gap-2 py-1.5 px-3 rounded-md',
+          config.bg
         )}>
           <span className={cn('font-medium text-sm', config.iconColor)}>
             {config.label}
@@ -88,8 +91,8 @@ export function TimelineBlock({
         </div>
       </div>
 
-      {/* Activities or empty state */}
-      <div className="space-y-3 pb-6">
+      {/* Activities or premium empty state */}
+      <div className="space-y-3 pb-5">
         {items.length > 0 ? (
           items.map((item, idx) => {
             const globalIndex = startIndex + idx;
@@ -105,11 +108,14 @@ export function TimelineBlock({
             );
           })
         ) : (
-          <div className={cn(
-            'py-6 px-4 rounded-xl border border-dashed border-border/50',
-            'bg-card/30 text-center'
-          )}>
-            <p className="text-sm text-muted-foreground">Nothing planned yet</p>
+          <div className="empty-state">
+            <p className="text-sm text-muted-foreground mb-2">
+              No plans yet for this time block
+            </p>
+            <p className="text-xs text-muted-foreground/60 flex items-center justify-center gap-1">
+              <Plus className="w-3 h-3" />
+              Use "Regenerate" to add suggestions
+            </p>
           </div>
         )}
       </div>
