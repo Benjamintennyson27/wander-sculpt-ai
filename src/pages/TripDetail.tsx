@@ -57,10 +57,11 @@ export default function TripDetail() {
   }, [id, trip?.status]);
 
   const fetchTrip = async () => {
-    const [tripResult, itinerariesResult, shareResult] = await Promise.all([
+    const [tripResult, itinerariesResult, shareResult, verificationsResult] = await Promise.all([
       supabase.from('trips').select('*').eq('id', id).single(),
       supabase.from('itineraries').select('*').eq('trip_id', id).order('option_index'),
-      supabase.from('trip_share_tokens').select('token').eq('trip_id', id).limit(1)
+      supabase.from('trip_share_tokens').select('token').eq('trip_id', id).limit(1),
+      supabase.from('place_verifications').select('*').eq('trip_id', id)
     ]);
 
     if (!tripResult.error && tripResult.data) {
@@ -72,7 +73,45 @@ export default function TripDetail() {
       }
     }
     if (!itinerariesResult.error && itinerariesResult.data) {
-      const parsed = itinerariesResult.data.map(parseItinerary);
+      // Build verification lookup map
+      const verificationsMap = new Map<string, any>();
+      if (!verificationsResult.error && verificationsResult.data) {
+        for (const v of verificationsResult.data) {
+          verificationsMap.set(v.itinerary_item_id, v);
+        }
+      }
+      
+      // Parse itineraries and merge verification data
+      const parsed = itinerariesResult.data.map(raw => {
+        const itinerary = parseItinerary(raw);
+        // Merge verifications into items
+        for (const day of itinerary.days) {
+          for (let itemIdx = 0; itemIdx < day.items.length; itemIdx++) {
+            const item = day.items[itemIdx];
+            // Generate the same stable ID used by verify-trip-places
+            const itemId = `${itinerary.id}-d${day.day}-i${itemIdx}`;
+            const verification = verificationsMap.get(itemId);
+            if (verification) {
+              // Merge verification into verified_facts
+              item.verified_facts = {
+                verified_note: verification.reasoning,
+                hours_text: null,
+                price_text: null,
+                closed_day_text: null,
+                sources: verification.sources || [],
+                // Add extra verification fields
+                status: verification.status,
+                quality_score: verification.quality_score,
+                best_name: verification.best_name,
+                address: verification.address,
+                lat: verification.lat,
+                lng: verification.lng,
+              };
+            }
+          }
+        }
+        return itinerary;
+      });
       setItineraries(parsed);
       
       const tripData = tripResult.data as Trip | null;
@@ -120,25 +159,22 @@ export default function TripDetail() {
   };
 
   const handleEnrichFacts = async () => {
-    const currentIt = itineraries.find(it => it.option_index === selectedOption);
-    if (!currentIt) return;
-
     setEnriching(true);
     try {
-      const { error } = await supabase.functions.invoke('enrich-itinerary', {
-        body: { trip_id: id, option_id: currentIt.id }
+      const { error } = await supabase.functions.invoke('verify-trip-places', {
+        body: { tripId: id }
       });
 
       if (error) throw error;
 
-      toast({ title: 'Facts verified!', description: 'Itinerary enriched with real-world data.' });
+      toast({ title: 'Facts verified!', description: 'Places verified with real-world data.' });
       fetchTrip();
     } catch (error) {
-      console.error('Enrichment error:', error);
+      console.error('Verification error:', error);
       toast({
         variant: 'destructive',
         title: 'Verification failed',
-        description: 'Could not fetch verified facts. Try again later.'
+        description: 'Could not verify places. Try again later.'
       });
     } finally {
       setEnriching(false);
