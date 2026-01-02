@@ -78,9 +78,9 @@ function extractAddress(snippets: string[]): string | null {
 }
 
 async function searchYou(query: string, apiKey: string): Promise<SearchResult[]> {
-  const youApiUrl = new URL('https://api.ydc-index.io/search');
+  const youApiUrl = new URL('https://ydc-index.io/v1/search');
   youApiUrl.searchParams.set('query', query);
-  youApiUrl.searchParams.set('num_web_results', '5');
+  youApiUrl.searchParams.set('count', '5');
   
   console.log(`Searching YOU API: ${query}`);
   
@@ -99,14 +99,13 @@ async function searchYou(query: string, apiKey: string): Promise<SearchResult[]>
   const data = await response.json();
   const results: SearchResult[] = [];
   
-  // Handle different API response formats
-  const hits = data.hits || data.results?.web || [];
-  for (const hit of hits.slice(0, 5)) {
-    const snippets = hit.snippets || [];
+  // Handle YOU.com API response format: results.web array
+  const webResults = data.results?.web || [];
+  for (const hit of webResults.slice(0, 5)) {
     results.push({
       title: hit.title || '',
       url: hit.url || '',
-      snippet: snippets[0] || hit.description || '',
+      snippet: hit.description || hit.snippet || '',
     });
   }
   
