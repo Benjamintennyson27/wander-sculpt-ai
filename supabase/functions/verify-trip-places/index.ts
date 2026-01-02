@@ -116,10 +116,13 @@ Deno.serve(async (req) => {
       const days = itinerary.days as any[] || [];
       for (const day of days) {
         const dayItems = day.items || [];
-        for (const item of dayItems) {
-          if (item.id && item.title && !shouldSkipItem(item.title)) {
+        for (let itemIdx = 0; itemIdx < dayItems.length; itemIdx++) {
+          const item = dayItems[itemIdx];
+          if (item.title && !shouldSkipItem(item.title)) {
+            // Generate a stable ID from itinerary + day + item index if not present
+            const itemId = item.id || `${itinerary.id}-d${day.day || 0}-i${itemIdx}`;
             items.push({
-              id: item.id,
+              id: itemId,
               title: item.title,
               location_area: item.location_area || null,
             });
