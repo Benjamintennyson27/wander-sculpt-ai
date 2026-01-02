@@ -2,12 +2,22 @@ import { useState, forwardRef } from 'react';
 import { 
   MapPin, Clock, Utensils, Users, AlertTriangle, ExternalLink, 
   BadgeCheck, ChevronDown, ChevronUp, Timer, Ban, IndianRupee,
-  Landmark, UtensilsCrossed, Car, Hotel, Star
+  Landmark, UtensilsCrossed, Car, Hotel
 } from 'lucide-react';
 import { ItineraryItem } from '@/lib/itinerary-adapter';
-import { formatActivityDetails, formatDuration, formatCostRange } from '@/lib/format-activity';
+import { 
+  formatActivityDetails, 
+  formatDuration, 
+  formatCostRange, 
+  parseSources,
+  Source 
+} from '@/lib/format-activity';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+
+// ============================================
+// Types
+// ============================================
 
 interface ActivityCardProps {
   item: ItineraryItem & { maps_query?: string };
@@ -17,63 +27,134 @@ interface ActivityCardProps {
   timeBlock: 'morning' | 'afternoon' | 'evening' | 'night';
 }
 
-// Premium time block colors using design system
-const timeBlockStyles = {
-  morning: {
-    accent: 'text-amber-500',
-    bg: 'bg-amber-500/8',
-    border: 'border-amber-500/15',
-    ring: 'ring-amber-500/30',
-  },
-  afternoon: {
-    accent: 'text-orange-500',
-    bg: 'bg-orange-500/8',
-    border: 'border-orange-500/15',
-    ring: 'ring-orange-500/30',
-  },
-  evening: {
-    accent: 'text-primary',
-    bg: 'bg-primary/8',
-    border: 'border-primary/15',
-    ring: 'ring-primary/30',
-  },
-  night: {
-    accent: 'text-accent',
-    bg: 'bg-accent/8',
-    border: 'border-accent/15',
-    ring: 'ring-accent/30',
-  },
-};
-
-// Activity type detection
-function getActivityType(item: ItineraryItem): { icon: typeof Landmark; label: string; color: string } {
-  if (item.food_related) {
-    return { icon: UtensilsCrossed, label: 'Food', color: 'text-orange-400 bg-orange-500/10' };
-  }
-  if (item.transit_tip || /transit|travel|drive|cab|taxi|bus|train|metro/i.test(item.title)) {
-    return { icon: Car, label: 'Transit', color: 'text-accent bg-accent/10' };
-  }
-  if (/hotel|stay|accommodation|resort|hostel|airbnb/i.test(item.title)) {
-    return { icon: Hotel, label: 'Hotel', color: 'text-primary bg-primary/10' };
-  }
-  return { icon: Landmark, label: 'Attraction', color: 'text-primary bg-primary/10' };
+interface ActivityType {
+  icon: typeof Landmark;
+  label: string;
+  colorClass: string;
 }
+
+// ============================================
+// Constants
+// ============================================
+
+const TIME_BLOCK_STYLES = {
+  morning: { ring: 'ring-amber-500/30', bg: 'bg-amber-500/8', border: 'border-amber-500/15' },
+  afternoon: { ring: 'ring-orange-500/30', bg: 'bg-orange-500/8', border: 'border-orange-500/15' },
+  evening: { ring: 'ring-primary/30', bg: 'bg-primary/8', border: 'border-primary/15' },
+  night: { ring: 'ring-accent/30', bg: 'bg-accent/8', border: 'border-accent/15' },
+} as const;
+
+// ============================================
+// Helper Functions
+// ============================================
+
+function detectActivityType(item: ItineraryItem): ActivityType {
+  const title = item.title.toLowerCase();
+  
+  if (item.food_related) {
+    return { icon: UtensilsCrossed, label: 'Food', colorClass: 'text-orange-400 bg-orange-500/10' };
+  }
+  if (item.transit_tip || /transit|travel|drive|cab|taxi|bus|train|metro/i.test(title)) {
+    return { icon: Car, label: 'Transit', colorClass: 'text-accent bg-accent/10' };
+  }
+  if (/hotel|stay|accommodation|resort|hostel|airbnb/i.test(title)) {
+    return { icon: Hotel, label: 'Hotel', colorClass: 'text-primary bg-primary/10' };
+  }
+  return { icon: Landmark, label: 'Attraction', colorClass: 'text-primary bg-primary/10' };
+}
+
+function buildMapsUrl(query?: string): string | null {
+  if (!query) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+// ============================================
+// Sub-components
+// ============================================
+
+function TypeBadge({ type }: { type: ActivityType }) {
+  const Icon = type.icon;
+  return (
+    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium', type.colorClass)}>
+      <Icon className="w-3 h-3" />
+      {type.label}
+    </span>
+  );
+}
+
+function VerifiedBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-verified/15 text-verified">
+      <BadgeCheck className="w-3 h-3" />
+      Verified
+    </span>
+  );
+}
+
+function InfoChip({ icon: Icon, children, warning }: { icon: typeof Timer; children: React.ReactNode; warning?: boolean }) {
+  return (
+    <span className={cn('info-chip', warning && 'text-warning')}>
+      <Icon className="w-3 h-3" />
+      {children}
+    </span>
+  );
+}
+
+function SourcesList({ sources, open, onOpenChange }: { sources: Source[]; open: boolean; onOpenChange: (open: boolean) => void }) {
+  if (sources.length === 0) {
+    return <span className="text-xs text-muted-foreground/50">No sources</span>;
+  }
+
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <CollapsibleTrigger 
+        onClick={(e) => e.stopPropagation()}
+        className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        Sources ({sources.length})
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-2">
+        <div className="space-y-1.5">
+          {sources.map((source, idx) => (
+            <a
+              key={idx}
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-start gap-2 p-2 rounded-md bg-secondary/50 hover:bg-secondary/70 transition-colors text-xs"
+            >
+              <ExternalLink className="w-3 h-3 mt-0.5 flex-shrink-0 text-primary" />
+              <div className="min-w-0">
+                <div className="font-medium text-foreground truncate">{source.title}</div>
+                {source.snippet && (
+                  <div className="text-muted-foreground line-clamp-2">{source.snippet}</div>
+                )}
+              </div>
+            </a>
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+// ============================================
+// Main Component
+// ============================================
 
 export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
   function ActivityCard({ item, index, isSelected, onSelect, timeBlock }, ref) {
     const [sourcesOpen, setSourcesOpen] = useState(false);
     const [notesExpanded, setNotesExpanded] = useState(false);
-    const styles = timeBlockStyles[timeBlock];
-    const activityType = getActivityType(item);
-    const TypeIcon = activityType.icon;
     
-    const mapsUrl = item.maps_query 
-      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.maps_query)}`
-      : null;
-
+    const styles = TIME_BLOCK_STYLES[timeBlock];
+    const activityType = detectActivityType(item);
+    const mapsUrl = buildMapsUrl(item.maps_query);
     const facts = item.verified_facts;
     
-    // Format and sanitize all verified facts
+    // Format verified facts
     const formatted = facts ? formatActivityDetails({
       hours: facts.hours_text,
       closedDay: facts.closed_day_text,
@@ -82,9 +163,7 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
     }) : null;
     
     const hasVerifiedData = formatted && (formatted.hours || formatted.price || formatted.closedDay || formatted.notes);
-    const hasSources = facts?.sources && facts.sources.length > 0;
-    
-    // Format cost and duration
+    const sources = parseSources(facts?.sources);
     const costDisplay = formatCostRange(item.cost_min, item.cost_max);
     const durationDisplay = formatDuration(item.duration_minutes);
 
@@ -101,36 +180,17 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
         )}
       >
         <div className="p-4 space-y-3">
-          {/* Header: Title + Type Tag + Verified Badge */}
+          {/* Header */}
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0 space-y-1.5">
-              {/* Title */}
               <h5 className="font-display text-[15px] text-foreground leading-snug">
                 {item.title}
               </h5>
-              
-              {/* Type + Verified row */}
               <div className="flex flex-wrap items-center gap-2">
-                {/* Type tag */}
-                <span className={cn(
-                  'inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium',
-                  activityType.color
-                )}>
-                  <TypeIcon className="w-3 h-3" />
-                  {activityType.label}
-                </span>
-                
-                {/* Verified badge */}
-                {hasVerifiedData && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-verified/15 text-verified">
-                    <BadgeCheck className="w-3 h-3" />
-                    Verified
-                  </span>
-                )}
+                <TypeBadge type={activityType} />
+                {hasVerifiedData && <VerifiedBadge />}
               </div>
             </div>
-            
-            {/* Cost badge */}
             {costDisplay && (
               <div className="flex-shrink-0 px-2.5 py-1 rounded-md bg-secondary/70 text-xs font-medium text-foreground">
                 {costDisplay}
@@ -138,7 +198,7 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
             )}
           </div>
 
-          {/* Location + Duration line */}
+          {/* Location + Duration */}
           {(item.location_area || durationDisplay) && (
             <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
               {item.location_area && (
@@ -163,31 +223,16 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
             </p>
           )}
 
-          {/* Key Details: Info Chips */}
+          {/* Verified Info Chips */}
           {hasVerifiedData && (
             <div className="flex flex-wrap gap-2">
-              {formatted.hours && (
-                <span className="info-chip">
-                  <Timer className="w-3 h-3 text-muted-foreground" />
-                  {formatted.hours}
-                </span>
-              )}
-              {formatted.price && (
-                <span className="info-chip">
-                  <IndianRupee className="w-3 h-3 text-muted-foreground" />
-                  {formatted.price}
-                </span>
-              )}
-              {formatted.closedDay && (
-                <span className="info-chip text-warning">
-                  <Ban className="w-3 h-3" />
-                  Closed: {formatted.closedDay}
-                </span>
-              )}
+              {formatted.hours && <InfoChip icon={Timer}>{formatted.hours}</InfoChip>}
+              {formatted.price && <InfoChip icon={IndianRupee}>{formatted.price}</InfoChip>}
+              {formatted.closedDay && <InfoChip icon={Ban} warning>Closed: {formatted.closedDay}</InfoChip>}
             </div>
           )}
 
-          {/* Verified Note (collapsible if long) */}
+          {/* Verified Note */}
           {formatted?.notes && (
             <div className="text-sm text-muted-foreground border-l-2 border-verified/30 pl-3">
               {formatted.notes.length > 100 && !notesExpanded ? (
@@ -200,13 +245,11 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
                     More
                   </button>
                 </>
-              ) : (
-                formatted.notes
-              )}
+              ) : formatted.notes}
             </div>
           )}
 
-          {/* Meta: Kid-friendly, Food tags */}
+          {/* Meta Tags */}
           {(item.food_related || item.kid_friendly) && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               {item.food_related && (
@@ -224,14 +267,14 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
             </div>
           )}
 
-          {/* Transit tip */}
+          {/* Transit Tip */}
           {item.transit_tip && (
             <div className="p-2.5 rounded-md bg-accent/8 border border-accent/15">
               <p className="text-xs text-accent">🚗 {item.transit_tip}</p>
             </div>
           )}
 
-          {/* Assumptions warning */}
+          {/* Assumptions Warning */}
           {item.assumptions && (
             <div className="p-2.5 rounded-md bg-warning/8 border border-warning/15 flex items-start gap-2">
               <AlertTriangle className="w-3.5 h-3.5 text-warning mt-0.5 flex-shrink-0" />
@@ -239,44 +282,10 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
             </div>
           )}
 
-          {/* Actions row */}
+          {/* Actions Row */}
           <div className="flex items-center justify-between pt-1">
-            {/* Sources */}
-            {hasSources ? (
-              <Collapsible open={sourcesOpen} onOpenChange={setSourcesOpen}>
-                <CollapsibleTrigger 
-                  onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {sourcesOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                  Sources ({facts.sources!.length})
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2">
-                  <div className="space-y-1.5">
-                    {facts.sources!.map((source, idx) => (
-                      <a
-                        key={idx}
-                        href={source.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="flex items-start gap-2 p-2 rounded-md bg-secondary/50 hover:bg-secondary/70 transition-colors text-xs"
-                      >
-                        <ExternalLink className="w-3 h-3 mt-0.5 flex-shrink-0 text-primary" />
-                        <div className="min-w-0">
-                          <div className="font-medium text-foreground truncate">{source.title}</div>
-                          <div className="text-muted-foreground line-clamp-2">{source.snippet}</div>
-                        </div>
-                      </a>
-                    ))}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            ) : (
-              <span className="text-xs text-muted-foreground/50">No sources</span>
-            )}
-
-            {/* Open in Maps */}
+            <SourcesList sources={sources} open={sourcesOpen} onOpenChange={setSourcesOpen} />
+            
             {mapsUrl && (
               <a
                 href={mapsUrl}
