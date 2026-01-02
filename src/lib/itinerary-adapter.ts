@@ -15,6 +15,13 @@ export interface VerifiedFacts {
   price_text?: string | null;
   closed_day_text?: string | null;
   sources?: Source[];
+  // Verification status fields
+  status?: 'verified' | 'partial' | 'unverified' | 'failed';
+  quality_score?: number;
+  best_name?: string | null;
+  address?: string | null;
+  lat?: number | null;
+  lng?: number | null;
 }
 
 export interface ItineraryItem {

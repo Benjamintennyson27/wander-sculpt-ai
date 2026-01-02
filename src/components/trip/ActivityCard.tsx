@@ -82,11 +82,20 @@ function TypeBadge({ type }: { type: ActivityType }) {
   );
 }
 
-function VerifiedBadge() {
+function VerifiedBadge({ status, score }: { status?: string; score?: number }) {
+  const statusConfig = {
+    verified: { label: 'Verified', colorClass: 'bg-verified/15 text-verified' },
+    partial: { label: 'Partial', colorClass: 'bg-yellow-500/15 text-yellow-400' },
+    unverified: { label: 'Unverified', colorClass: 'bg-muted text-muted-foreground' },
+    failed: { label: 'Failed', colorClass: 'bg-destructive/15 text-destructive' },
+  };
+  
+  const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.unverified;
+  
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium bg-verified/15 text-verified">
+    <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium', config.colorClass)}>
       <BadgeCheck className="w-3 h-3" />
-      Verified
+      {config.label}{score !== undefined && ` (${score})`}
     </span>
   );
 }
@@ -162,7 +171,7 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
       notes: facts.verified_note,
     }) : null;
     
-    const hasVerifiedData = formatted && (formatted.hours || formatted.price || formatted.closedDay || formatted.notes);
+    const hasVerifiedData = facts && (facts.status || formatted?.hours || formatted?.price || formatted?.closedDay || formatted?.notes);
     const sources = parseSources(facts?.sources);
     const costDisplay = formatCostRange(item.cost_min, item.cost_max);
     const durationDisplay = formatDuration(item.duration_minutes);
@@ -188,7 +197,7 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
               </h5>
               <div className="flex flex-wrap items-center gap-2">
                 <TypeBadge type={activityType} />
-                {hasVerifiedData && <VerifiedBadge />}
+                {hasVerifiedData && <VerifiedBadge status={facts?.status} score={facts?.quality_score} />}
               </div>
             </div>
             {costDisplay && (
@@ -199,12 +208,12 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
           </div>
 
           {/* Location + Duration */}
-          {(item.location_area || durationDisplay) && (
+          {(item.location_area || facts?.address || durationDisplay) && (
             <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-              {item.location_area && (
+              {(facts?.address || item.location_area) && (
                 <span className="flex items-center gap-1.5">
                   <MapPin className="w-3.5 h-3.5 text-muted-foreground/70" />
-                  <span className="truncate max-w-[200px]">{item.location_area}</span>
+                  <span className="truncate max-w-[250px]">{facts?.address || item.location_area}</span>
                 </span>
               )}
               {durationDisplay && (
