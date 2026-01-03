@@ -41,24 +41,224 @@ const darkMapStyle = [
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#4a5568' }] },
 ];
 
+// Inner component that uses the Google Maps hook - only rendered when API key is ready
+function GoogleMapContent({
+  apiKey,
+  day,
+  selectedActivityIndex,
+  onPinClick,
+  destination,
+}: {
+  apiKey: string;
+  day: ItineraryDay;
+  selectedActivityIndex: number | null;
+  onPinClick: (activityIndex: number) => void;
+  destination?: string;
+}) {
+  const [selectedMarker, setSelectedMarker] = useState<number | null>(null);
+  const [map, setMap] = useState<google.maps.Map | null>(null);
+  const [geocodedLocations, setGeocodedLocations] = useState<Map<number, { lat: number; lng: number }>>(new Map());
+
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: apiKey,
+    id: 'google-map-script',
+  });
+
+  // Flatten activities with their indices
+  const activities: { item: ItineraryItem & { maps_query?: string }; index: number; block: string }[] = [];
+  const timeBlocks = ['morning', 'afternoon', 'evening', 'night'];
+  let globalIndex = 0;
+  
+  timeBlocks.forEach(block => {
+    day.items
+      .filter(item => item.time_block === block)
+      .forEach(item => {
+        activities.push({ item, index: globalIndex, block });
+        globalIndex++;
+      });
+  });
+
+  // Geocode locations when activities or map changes
+  useEffect(() => {
+    if (!isLoaded || !map || activities.length === 0) return;
+
+    const geocoder = new google.maps.Geocoder();
+    const newLocations = new Map<number, { lat: number; lng: number }>();
+    let completed = 0;
+
+    activities.forEach((activity) => {
+      // Check if we have verified lat/lng
+      const verifiedFacts = activity.item.verified_facts;
+      if (verifiedFacts?.lat && verifiedFacts?.lng) {
+        newLocations.set(activity.index, { lat: verifiedFacts.lat, lng: verifiedFacts.lng });
+        completed++;
+        if (completed === activities.length) {
+          setGeocodedLocations(new Map(newLocations));
+        }
+        return;
+      }
+
+      // Otherwise geocode
+      const query = activity.item.maps_query || 
+        `${activity.item.title}, ${activity.item.location_area || ''}, ${destination || ''}`;
+      
+      geocoder.geocode({ address: query }, (results, status) => {
+        if (status === 'OK' && results && results[0]) {
+          const location = results[0].geometry.location;
+          newLocations.set(activity.index, { lat: location.lat(), lng: location.lng() });
+        }
+        completed++;
+        if (completed === activities.length) {
+          setGeocodedLocations(new Map(newLocations));
+        }
+      });
+    });
+  }, [isLoaded, map, day, destination]);
+
+  // Fit bounds when locations change
+  useEffect(() => {
+    if (!map || geocodedLocations.size === 0) return;
+
+    const bounds = new google.maps.LatLngBounds();
+    geocodedLocations.forEach((loc) => {
+      bounds.extend(new google.maps.LatLng(loc.lat, loc.lng));
+    });
+    
+    map.fitBounds(bounds, { top: 50, bottom: 80, left: 20, right: 20 });
+  }, [map, geocodedLocations]);
+
+  const onLoad = useCallback((map: google.maps.Map) => {
+    setMap(map);
+  }, []);
+
+  const onUnmount = useCallback(() => {
+    setMap(null);
+  }, []);
+
+  // Create custom marker icon
+  const createMarkerIcon = (color: string, label: string, isSelected: boolean) => {
+    const size = isSelected ? 36 : 28;
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="${color}" stroke="white" stroke-width="2"/>
+        <text x="${size/2}" y="${size/2 + 4}" text-anchor="middle" fill="white" font-size="${isSelected ? 14 : 11}" font-weight="bold" font-family="Arial">${label}</text>
+      </svg>
+    `;
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  };
+
+  if (loadError) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center p-8">
+          <MapPin className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">Map failed to load</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLoaded) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <GoogleMap
+      mapContainerStyle={mapContainerStyle}
+      center={{ lat: 20.5937, lng: 78.9629 }}
+      zoom={5}
+      onLoad={onLoad}
+      onUnmount={onUnmount}
+      options={{
+        styles: darkMapStyle,
+        disableDefaultUI: true,
+        zoomControl: true,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
+      }}
+    >
+      {activities.map((activity, idx) => {
+        const location = geocodedLocations.get(activity.index);
+        if (!location) return null;
+
+        const color = timeBlockPinColors[activity.block as keyof typeof timeBlockPinColors] || timeBlockPinColors.morning;
+        const isSelected = selectedActivityIndex === activity.index;
+
+        return (
+          <Marker
+            key={activity.index}
+            position={location}
+            icon={{
+              url: createMarkerIcon(color, String(idx + 1), isSelected),
+              scaledSize: new google.maps.Size(isSelected ? 36 : 28, isSelected ? 36 : 28),
+              anchor: new google.maps.Point(isSelected ? 18 : 14, isSelected ? 18 : 14),
+            }}
+            zIndex={isSelected ? 100 : 1}
+            onClick={() => {
+              onPinClick(activity.index);
+              setSelectedMarker(activity.index);
+            }}
+          />
+        );
+      })}
+
+      {selectedMarker !== null && (() => {
+        const activity = activities.find(a => a.index === selectedMarker);
+        const location = geocodedLocations.get(selectedMarker);
+        if (!activity || !location) return null;
+
+        return (
+          <InfoWindow
+            position={location}
+            onCloseClick={() => setSelectedMarker(null)}
+          >
+            <div className="p-1 max-w-[200px]">
+              <p className="font-medium text-sm text-gray-900">{activity.item.title}</p>
+              {activity.item.location_area && (
+                <p className="text-xs text-gray-600 mt-0.5">{activity.item.location_area}</p>
+              )}
+              {activity.item.maps_query && (
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activity.item.maps_query)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-600 hover:underline mt-1 inline-flex items-center gap-1"
+                >
+                  Open in Maps <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+            </div>
+          </InfoWindow>
+        );
+      })()}
+    </GoogleMap>
+  );
+}
+
 export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
   function TripMap({ day, selectedActivityIndex, onPinClick, className, destination }, ref) {
     const [apiKey, setApiKey] = useState<string | null>(null);
     const [loadingKey, setLoadingKey] = useState(true);
-    const [selectedMarker, setSelectedMarker] = useState<number | null>(null);
-    const [map, setMap] = useState<google.maps.Map | null>(null);
-    const [geocodedLocations, setGeocodedLocations] = useState<Map<number, { lat: number; lng: number }>>(new Map());
+    const [keyError, setKeyError] = useState(false);
 
-    // Fetch Google Maps API key
+    // Fetch Google Maps API key once
     useEffect(() => {
       const fetchApiKey = async () => {
         try {
           const { data, error } = await supabase.functions.invoke('get-maps-key');
           if (!error && data?.apiKey) {
             setApiKey(data.apiKey);
+          } else {
+            setKeyError(true);
           }
         } catch (e) {
           console.error('Failed to fetch maps key:', e);
+          setKeyError(true);
         } finally {
           setLoadingKey(false);
         }
@@ -66,96 +266,7 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
       fetchApiKey();
     }, []);
 
-    const { isLoaded, loadError } = useJsApiLoader({
-      googleMapsApiKey: apiKey || '',
-      id: 'google-map-script',
-    });
-
-    // Flatten activities with their indices
-    const activities: { item: ItineraryItem & { maps_query?: string }; index: number; block: string }[] = [];
-    if (day) {
-      const timeBlocks = ['morning', 'afternoon', 'evening', 'night'];
-      let globalIndex = 0;
-      
-      timeBlocks.forEach(block => {
-        day.items
-          .filter(item => item.time_block === block)
-          .forEach(item => {
-            activities.push({ item, index: globalIndex, block });
-            globalIndex++;
-          });
-      });
-    }
-
-    // Geocode locations when activities or map changes
-    useEffect(() => {
-      if (!isLoaded || !map || activities.length === 0) return;
-
-      const geocoder = new google.maps.Geocoder();
-      const newLocations = new Map<number, { lat: number; lng: number }>();
-
-      activities.forEach((activity, idx) => {
-        // Check if we have verified lat/lng
-        const verifiedFacts = activity.item.verified_facts;
-        if (verifiedFacts?.lat && verifiedFacts?.lng) {
-          newLocations.set(activity.index, { lat: verifiedFacts.lat, lng: verifiedFacts.lng });
-          if (idx === activities.length - 1) {
-            setGeocodedLocations(new Map(newLocations));
-          }
-          return;
-        }
-
-        // Otherwise geocode
-        const query = activity.item.maps_query || 
-          `${activity.item.title}, ${activity.item.location_area || ''}, ${destination || ''}`;
-        
-        geocoder.geocode({ address: query }, (results, status) => {
-          if (status === 'OK' && results && results[0]) {
-            const location = results[0].geometry.location;
-            newLocations.set(activity.index, { lat: location.lat(), lng: location.lng() });
-          }
-          
-          // Update state after all geocoding is done
-          if (idx === activities.length - 1) {
-            setTimeout(() => setGeocodedLocations(new Map(newLocations)), 100);
-          }
-        });
-      });
-    }, [isLoaded, map, day, destination]);
-
-    // Fit bounds when locations change
-    useEffect(() => {
-      if (!map || geocodedLocations.size === 0) return;
-
-      const bounds = new google.maps.LatLngBounds();
-      geocodedLocations.forEach((loc) => {
-        bounds.extend(new google.maps.LatLng(loc.lat, loc.lng));
-      });
-      
-      map.fitBounds(bounds, { top: 50, bottom: 80, left: 20, right: 20 });
-    }, [map, geocodedLocations]);
-
-    const onLoad = useCallback((map: google.maps.Map) => {
-      setMap(map);
-    }, []);
-
-    const onUnmount = useCallback(() => {
-      setMap(null);
-    }, []);
-
-    // Create custom marker icon
-    const createMarkerIcon = (color: string, label: string, isSelected: boolean) => {
-      const size = isSelected ? 36 : 28;
-      const svg = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-          <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="${color}" stroke="white" stroke-width="2"/>
-          <text x="${size/2}" y="${size/2 + 4}" text-anchor="middle" fill="white" font-size="${isSelected ? 14 : 11}" font-weight="bold" font-family="Arial">${label}</text>
-        </svg>
-      `;
-      return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-    };
-
-    // Loading state
+    // Loading API key state
     if (loadingKey) {
       return (
         <div 
@@ -176,7 +287,7 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
     }
 
     // No API key or error state
-    if (!apiKey || loadError) {
+    if (!apiKey || keyError) {
       return (
         <div 
           ref={ref}
@@ -195,7 +306,8 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
       );
     }
 
-    if (!day || activities.length === 0) {
+    // No day selected
+    if (!day || day.items.length === 0) {
       return (
         <div 
           ref={ref}
@@ -216,8 +328,6 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
       );
     }
 
-    const selectedActivity = activities.find(a => a.index === selectedActivityIndex);
-
     return (
       <div 
         ref={ref}
@@ -227,91 +337,22 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
           className
         )}
       >
-        {isLoaded ? (
-          <GoogleMap
-            mapContainerStyle={mapContainerStyle}
-            center={{ lat: 20.5937, lng: 78.9629 }} // Default to India center
-            zoom={5}
-            onLoad={onLoad}
-            onUnmount={onUnmount}
-            options={{
-              styles: darkMapStyle,
-              disableDefaultUI: true,
-              zoomControl: true,
-              mapTypeControl: false,
-              streetViewControl: false,
-              fullscreenControl: false,
-            }}
-          >
-            {activities.map((activity, idx) => {
-              const location = geocodedLocations.get(activity.index);
-              if (!location) return null;
-
-              const color = timeBlockPinColors[activity.block as keyof typeof timeBlockPinColors] || timeBlockPinColors.morning;
-              const isSelected = selectedActivityIndex === activity.index;
-
-              return (
-                <Marker
-                  key={activity.index}
-                  position={location}
-                  icon={{
-                    url: createMarkerIcon(color, String(idx + 1), isSelected),
-                    scaledSize: new google.maps.Size(isSelected ? 36 : 28, isSelected ? 36 : 28),
-                    anchor: new google.maps.Point(isSelected ? 18 : 14, isSelected ? 18 : 14),
-                  }}
-                  zIndex={isSelected ? 100 : 1}
-                  onClick={() => {
-                    onPinClick(activity.index);
-                    setSelectedMarker(activity.index);
-                  }}
-                />
-              );
-            })}
-
-            {selectedMarker !== null && (() => {
-              const activity = activities.find(a => a.index === selectedMarker);
-              const location = geocodedLocations.get(selectedMarker);
-              if (!activity || !location) return null;
-
-              return (
-                <InfoWindow
-                  position={location}
-                  onCloseClick={() => setSelectedMarker(null)}
-                >
-                  <div className="p-1 max-w-[200px]">
-                    <p className="font-medium text-sm text-gray-900">{activity.item.title}</p>
-                    {activity.item.location_area && (
-                      <p className="text-xs text-gray-600 mt-0.5">{activity.item.location_area}</p>
-                    )}
-                    {activity.item.maps_query && (
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activity.item.maps_query)}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-blue-600 hover:underline mt-1 inline-flex items-center gap-1"
-                      >
-                        Open in Maps <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </div>
-                </InfoWindow>
-              );
-            })()}
-          </GoogleMap>
-        ) : (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-          </div>
-        )}
+        <GoogleMapContent
+          apiKey={apiKey}
+          day={day}
+          selectedActivityIndex={selectedActivityIndex}
+          onPinClick={onPinClick}
+          destination={destination}
+        />
 
         {/* Day label */}
-        <div className="absolute top-3 left-3 flex items-center gap-2 px-2.5 py-1 rounded-md bg-card/90 backdrop-blur-sm border border-border/50">
+        <div className="absolute top-3 left-3 flex items-center gap-2 px-2.5 py-1 rounded-md bg-card/90 backdrop-blur-sm border border-border/50 z-10">
           <Navigation className="w-3.5 h-3.5 text-primary" />
           <span className="text-xs font-medium">Day {day.day}</span>
         </div>
 
         {/* Legend */}
-        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap justify-center gap-2">
+        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap justify-center gap-2 z-10">
           {Object.entries(timeBlockPinColors).map(([block, color]) => (
             <div 
               key={block}
