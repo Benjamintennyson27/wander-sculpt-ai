@@ -26,6 +26,7 @@ interface Alternative {
 
 interface ReplaceActivityModalProps {
   tripId: string;
+  itineraryId: string;
   currentItem: ItineraryItem;
   dayNumber: number;
   itemIndex: number;
@@ -36,6 +37,7 @@ interface ReplaceActivityModalProps {
 
 export function ReplaceActivityModal({
   tripId,
+  itineraryId,
   currentItem,
   dayNumber,
   itemIndex,
@@ -59,7 +61,7 @@ export function ReplaceActivityModal({
     
     try {
       const { data, error: fnError } = await supabase.functions.invoke('activity-alternatives', {
-        body: { trip_id: tripId, day_number: dayNumber, item_index: itemIndex }
+        body: { trip_id: tripId, itinerary_id: itineraryId, day_number: dayNumber, item_index: itemIndex }
       });
 
       if (fnError) throw fnError;
@@ -92,6 +94,7 @@ export function ReplaceActivityModal({
       const { data, error: fnError } = await supabase.functions.invoke('activity-swap', {
         body: {
           trip_id: tripId,
+          itinerary_id: itineraryId,
           day_number: dayNumber,
           item_index: itemIndex,
           new_item: alternative,

@@ -26,7 +26,7 @@ serve(async (req) => {
   }
 
   try {
-    const { trip_id, option_id, item_index, day_number } = await req.json();
+    const { trip_id, itinerary_id, item_index, day_number } = await req.json();
     
     if (!trip_id || item_index === undefined || day_number === undefined) {
       return new Response(
@@ -56,16 +56,16 @@ serve(async (req) => {
       throw new Error(`Trip not found: ${tripError?.message}`);
     }
 
-    // Get selected itinerary
-    const itineraryId = trip.selected_itinerary_id;
-    if (!itineraryId) {
-      throw new Error("No itinerary selected for this trip");
+    // Get itinerary - use provided itinerary_id or fall back to selected_itinerary_id
+    const targetItineraryId = itinerary_id || trip.selected_itinerary_id;
+    if (!targetItineraryId) {
+      throw new Error("No itinerary specified. Please select an itinerary option first.");
     }
 
     const { data: itinerary, error: itinError } = await supabase
       .from("itineraries")
       .select("*")
-      .eq("id", itineraryId)
+      .eq("id", targetItineraryId)
       .single();
 
     if (itinError || !itinerary) {

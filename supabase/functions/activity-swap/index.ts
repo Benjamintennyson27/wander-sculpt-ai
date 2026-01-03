@@ -12,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { trip_id, day_number, item_index, new_item, auto_verify } = await req.json();
+    const { trip_id, itinerary_id, day_number, item_index, new_item, auto_verify } = await req.json();
     
     if (!trip_id || day_number === undefined || item_index === undefined || !new_item) {
       return new Response(
@@ -37,16 +37,16 @@ serve(async (req) => {
       throw new Error(`Trip not found: ${tripError?.message}`);
     }
 
-    // Get selected itinerary
-    const itineraryId = trip.selected_itinerary_id;
-    if (!itineraryId) {
-      throw new Error("No itinerary selected for this trip");
+    // Get itinerary - use provided itinerary_id or fall back to selected_itinerary_id
+    const targetItineraryId = itinerary_id || trip.selected_itinerary_id;
+    if (!targetItineraryId) {
+      throw new Error("No itinerary specified. Please select an itinerary option first.");
     }
 
     const { data: itinerary, error: itinError } = await supabase
       .from("itineraries")
       .select("*")
-      .eq("id", itineraryId)
+      .eq("id", targetItineraryId)
       .single();
 
     if (itinError || !itinerary) {
@@ -91,7 +91,7 @@ serve(async (req) => {
     const { error: updateError } = await supabase
       .from("itineraries")
       .update({ days })
-      .eq("id", itineraryId);
+      .eq("id", targetItineraryId);
 
     if (updateError) {
       console.error("Failed to update itinerary:", updateError);
@@ -123,7 +123,7 @@ serve(async (req) => {
           },
           body: JSON.stringify({
             trip_id,
-            itinerary_item_id: `${itineraryId}-d${day_number}-i${item_index}`,
+            itinerary_item_id: `${targetItineraryId}-d${day_number}-i${item_index}`,
             query: swappedItem.maps_query || swappedItem.title,
             destination: trip.destination,
           }),

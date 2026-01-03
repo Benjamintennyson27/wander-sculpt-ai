@@ -880,6 +880,7 @@ export default function TripDetail() {
       {replaceModal.item && (
         <ReplaceActivityModal
           tripId={id || ''}
+          itineraryId={currentItinerary?.id || ''}
           currentItem={replaceModal.item}
           dayNumber={replaceModal.dayNumber}
           itemIndex={replaceModal.itemIndex}
