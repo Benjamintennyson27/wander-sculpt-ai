@@ -414,10 +414,9 @@ export default function TripDetail() {
               size="sm"
               onClick={() => setCopilotOpen(true)}
               disabled={trip.status === 'generating' || !trip.selected_itinerary_id}
-              className="hidden sm:flex"
             >
-              <Sparkles className="w-4 h-4 mr-2" />
-              Copilot
+              <Sparkles className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Copilot</span>
             </Button>
             
             <Button
@@ -632,6 +631,7 @@ export default function TripDetail() {
                             day={selectedDay}
                             selectedActivityIndex={selectedActivityIndex}
                             onPinClick={handlePinClick}
+                            destination={trip.destination}
                             className="h-[500px]"
                           />
                         </div>
@@ -859,6 +859,7 @@ export default function TripDetail() {
                   handlePinClick(idx);
                   setShowMobileMap(false);
                 }}
+                destination={trip.destination}
                 className="h-[400px]"
               />
             </div>
