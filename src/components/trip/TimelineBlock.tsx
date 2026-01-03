@@ -9,6 +9,7 @@ interface TimelineBlockProps {
   selectedActivityIndex?: number | null;
   onActivitySelect?: (globalIndex: number) => void;
   startIndex: number;
+  onReplaceItem?: (itemIndex: number, item: ItineraryItem) => void;
 }
 
 const blockConfig = {
@@ -56,6 +57,7 @@ export function TimelineBlock({
   selectedActivityIndex,
   onActivitySelect,
   startIndex,
+  onReplaceItem,
 }: TimelineBlockProps) {
   const config = blockConfig[block];
   const Icon = config.icon;
@@ -104,6 +106,7 @@ export function TimelineBlock({
                 timeBlock={block}
                 isSelected={selectedActivityIndex === globalIndex}
                 onSelect={() => onActivitySelect?.(globalIndex)}
+                onReplace={onReplaceItem ? () => onReplaceItem(idx, item) : undefined}
               />
             );
           })

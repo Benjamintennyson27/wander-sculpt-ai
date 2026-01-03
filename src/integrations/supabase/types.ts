@@ -176,6 +176,41 @@ export type Database = {
           },
         ]
       }
+      itinerary_edits_log: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          option_id: string
+          payload: Json
+          trip_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          option_id: string
+          payload?: Json
+          trip_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          option_id?: string
+          payload?: Json
+          trip_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "itinerary_edits_log_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       itinerary_item_facts: {
         Row: {
           closed_day_text: string | null
@@ -452,6 +487,67 @@ export type Database = {
           trip_id?: string
         }
         Relationships: []
+      }
+      trip_chat_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          role: string
+          thread_id: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          role: string
+          thread_id: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_chat_messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "trip_chat_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trip_chat_threads: {
+        Row: {
+          created_at: string
+          id: string
+          trip_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          trip_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          trip_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_chat_threads_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       trip_messages: {
         Row: {

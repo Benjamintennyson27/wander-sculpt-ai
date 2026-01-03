@@ -12,6 +12,7 @@ interface TimelineDayProps {
   selectedActivityIndex?: number | null;
   onActivitySelect?: (globalIndex: number) => void;
   dayStartIndex: number;
+  onReplaceActivity?: (itemIndex: number, item: ItineraryItem) => void;
 }
 
 const timeBlocks = ['morning', 'afternoon', 'evening', 'night'] as const;
@@ -25,6 +26,7 @@ export function TimelineDay({
   selectedActivityIndex,
   onActivitySelect,
   dayStartIndex,
+  onReplaceActivity,
 }: TimelineDayProps) {
   const itemsByBlock = groupItemsByTimeBlock(day.items) as Record<typeof timeBlocks[number], (ItineraryItem & { maps_query?: string })[]>;
   
@@ -112,6 +114,15 @@ export function TimelineDay({
                 selectedActivityIndex={selectedActivityIndex}
                 onActivitySelect={onActivitySelect}
                 startIndex={blockStartIndices[block]}
+                onReplaceItem={onReplaceActivity ? (itemIdx, item) => {
+                  // Calculate the relative index within the day's items
+                  const blockStartInDay = day.items.findIndex(i => 
+                    i.time_block === block && i.title === item.title
+                  );
+                  if (blockStartInDay >= 0) {
+                    onReplaceActivity(blockStartInDay, item);
+                  }
+                } : undefined}
               />
             ))}
           </div>
