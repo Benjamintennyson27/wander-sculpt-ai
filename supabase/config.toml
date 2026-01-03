@@ -20,3 +20,12 @@ verify_jwt = false
 
 [functions.verify-trip-places]
 verify_jwt = false
+
+[functions.copilot-edit]
+verify_jwt = false
+
+[functions.activity-alternatives]
+verify_jwt = false
+
+[functions.activity-swap]
+verify_jwt = false

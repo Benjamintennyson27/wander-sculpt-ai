@@ -2,7 +2,7 @@ import { useState, forwardRef } from 'react';
 import { 
   MapPin, Clock, Utensils, Users, AlertTriangle, ExternalLink, 
   BadgeCheck, ChevronDown, ChevronUp, Timer, Ban, IndianRupee,
-  Landmark, UtensilsCrossed, Car, Hotel
+  Landmark, UtensilsCrossed, Car, Hotel, ArrowLeftRight
 } from 'lucide-react';
 import { ItineraryItem } from '@/lib/itinerary-adapter';
 import { 
@@ -14,6 +14,7 @@ import {
 } from '@/lib/format-activity';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Button } from '@/components/ui/button';
 
 // ============================================
 // Types
@@ -25,6 +26,7 @@ interface ActivityCardProps {
   isSelected?: boolean;
   onSelect?: () => void;
   timeBlock: 'morning' | 'afternoon' | 'evening' | 'night';
+  onReplace?: () => void;
 }
 
 interface ActivityType {
@@ -154,7 +156,7 @@ function SourcesList({ sources, open, onOpenChange }: { sources: Source[]; open:
 // ============================================
 
 export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
-  function ActivityCard({ item, index, isSelected, onSelect, timeBlock }, ref) {
+  function ActivityCard({ item, index, isSelected, onSelect, timeBlock, onReplace }, ref) {
     const [sourcesOpen, setSourcesOpen] = useState(false);
     const [notesExpanded, setNotesExpanded] = useState(false);
     
@@ -293,7 +295,21 @@ export const ActivityCard = forwardRef<HTMLDivElement, ActivityCardProps>(
 
           {/* Actions Row */}
           <div className="flex items-center justify-between pt-1">
-            <SourcesList sources={sources} open={sourcesOpen} onOpenChange={setSourcesOpen} />
+            <div className="flex items-center gap-2">
+              <SourcesList sources={sources} open={sourcesOpen} onOpenChange={setSourcesOpen} />
+              
+              {onReplace && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => { e.stopPropagation(); onReplace(); }}
+                  className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5 mr-1" />
+                  Replace
+                </Button>
+              )}
+            </div>
             
             {mapsUrl && (
               <a

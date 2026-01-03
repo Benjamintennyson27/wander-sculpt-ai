@@ -10,7 +10,8 @@ import {
   ArrowLeft, Star, RefreshCw, Check, MapPin, 
   Calendar, Clock, Utensils, Lightbulb, AlertTriangle,
   Loader2, ChevronDown, ChevronUp, Users, IndianRupee,
-  Share2, Copy, Link as LinkIcon, Wallet, Map as MapIcon, X, BadgeCheck
+  Share2, Copy, Link as LinkIcon, Wallet, Map as MapIcon, X, BadgeCheck,
+  Sparkles
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { 
@@ -20,6 +21,8 @@ import {
 import { calculateBudget, formatCurrency, BudgetSummary } from '@/lib/budget-calculator';
 import { TimelineDay } from '@/components/trip/TimelineDay';
 import { TripMap } from '@/components/trip/TripMap';
+import { CopilotDrawer } from '@/components/trip/CopilotDrawer';
+import { ReplaceActivityModal } from '@/components/trip/ReplaceActivityModal';
 import { cn } from '@/lib/utils';
 
 export default function TripDetail() {
@@ -43,6 +46,17 @@ export default function TripDetail() {
   const [selectedDayIndex, setSelectedDayIndex] = useState<number>(0);
   const [selectedActivityIndex, setSelectedActivityIndex] = useState<number | null>(null);
   const [showMobileMap, setShowMobileMap] = useState(false);
+  
+  // Copilot state
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  
+  // Replace activity modal state
+  const [replaceModal, setReplaceModal] = useState<{
+    isOpen: boolean;
+    item: ItineraryItem | null;
+    dayNumber: number;
+    itemIndex: number;
+  }>({ isOpen: false, item: null, dayNumber: 0, itemIndex: 0 });
 
   useEffect(() => {
     if (id) {
@@ -307,6 +321,26 @@ export default function TripDetail() {
     setSelectedActivityIndex(null);
   };
 
+  // Handle replace activity
+  const handleReplaceActivity = (dayNumber: number, itemIndex: number, item: ItineraryItem) => {
+    setReplaceModal({
+      isOpen: true,
+      item,
+      dayNumber,
+      itemIndex,
+    });
+  };
+
+  // Handle copilot edit completion
+  const handleCopilotEditApplied = () => {
+    fetchTrip();
+  };
+
+  // Handle swap completion
+  const handleSwapComplete = () => {
+    fetchTrip();
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen">
@@ -373,6 +407,17 @@ export default function TripDetail() {
             >
               <MapIcon className="w-4 h-4 mr-2" />
               Show Map
+            </Button>
+            
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCopilotOpen(true)}
+              disabled={trip.status === 'generating' || !trip.selected_itinerary_id}
+              className="hidden sm:flex"
+            >
+              <Sparkles className="w-4 h-4 mr-2" />
+              Copilot
             </Button>
             
             <Button
@@ -570,6 +615,7 @@ export default function TripDetail() {
                               selectedActivityIndex={selectedActivityIndex}
                               onActivitySelect={handleActivitySelect(dayIdx)}
                               dayStartIndex={getDayStartIndex(dayIdx)}
+                              onReplaceActivity={(itemIndex, item) => handleReplaceActivity(day.day, itemIndex, item)}
                             />
                           ))}
                         </div>
@@ -818,6 +864,28 @@ export default function TripDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Copilot Drawer */}
+      <CopilotDrawer
+        tripId={id || ''}
+        optionId={currentItinerary?.option_label}
+        isOpen={copilotOpen}
+        onClose={() => setCopilotOpen(false)}
+        onEditApplied={handleCopilotEditApplied}
+      />
+
+      {/* Replace Activity Modal */}
+      {replaceModal.item && (
+        <ReplaceActivityModal
+          tripId={id || ''}
+          currentItem={replaceModal.item}
+          dayNumber={replaceModal.dayNumber}
+          itemIndex={replaceModal.itemIndex}
+          isOpen={replaceModal.isOpen}
+          onClose={() => setReplaceModal({ isOpen: false, item: null, dayNumber: 0, itemIndex: 0 })}
+          onSwapComplete={handleSwapComplete}
+        />
       )}
     </div>
   );
