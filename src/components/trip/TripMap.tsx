@@ -1,27 +1,76 @@
-import { useState, forwardRef } from 'react';
+import { useState, useEffect, forwardRef, useCallback } from 'react';
+import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
+import { supabase } from '@/integrations/supabase/client';
 import { ItineraryDay, ItineraryItem } from '@/lib/itinerary-adapter';
 import { cn } from '@/lib/utils';
-import { MapPin, Navigation, ExternalLink } from 'lucide-react';
+import { MapPin, Navigation, ExternalLink, Loader2 } from 'lucide-react';
 
 interface TripMapProps {
   day: ItineraryDay | null;
   selectedActivityIndex: number | null;
   onPinClick: (activityIndex: number) => void;
   className?: string;
+  destination?: string;
 }
 
 // Premium time block pin colors
 const timeBlockPinColors = {
-  morning: { bg: '#d97706', border: '#b45309' },    // amber-600
-  afternoon: { bg: '#ea580c', border: '#c2410c' },  // orange-600
-  evening: { bg: '#0891b2', border: '#0e7490' },    // primary teal
-  night: { bg: '#2563eb', border: '#1d4ed8' },      // blue-600 (accent)
+  morning: '#d97706',    // amber-600
+  afternoon: '#ea580c',  // orange-600
+  evening: '#0891b2',    // primary teal
+  night: '#2563eb',      // blue-600 (accent)
 };
 
+const mapContainerStyle = {
+  width: '100%',
+  height: '100%',
+};
+
+const darkMapStyle = [
+  { elementType: 'geometry', stylers: [{ color: '#1a1a2e' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#1a1a2e' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#8b8b9a' }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#3a3a4e' }] },
+  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#242438' }] },
+  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#6b6b7a' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2a2a3e' }] },
+  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#8a8a9a' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#3a3a4e' }] },
+  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#242438' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0e1626' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#4a5568' }] },
+];
+
 export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
-  function TripMap({ day, selectedActivityIndex, onPinClick, className }, ref) {
-    const [hoveredPin, setHoveredPin] = useState<number | null>(null);
-    
+  function TripMap({ day, selectedActivityIndex, onPinClick, className, destination }, ref) {
+    const [apiKey, setApiKey] = useState<string | null>(null);
+    const [loadingKey, setLoadingKey] = useState(true);
+    const [selectedMarker, setSelectedMarker] = useState<number | null>(null);
+    const [map, setMap] = useState<google.maps.Map | null>(null);
+    const [geocodedLocations, setGeocodedLocations] = useState<Map<number, { lat: number; lng: number }>>(new Map());
+
+    // Fetch Google Maps API key
+    useEffect(() => {
+      const fetchApiKey = async () => {
+        try {
+          const { data, error } = await supabase.functions.invoke('get-maps-key');
+          if (!error && data?.apiKey) {
+            setApiKey(data.apiKey);
+          }
+        } catch (e) {
+          console.error('Failed to fetch maps key:', e);
+        } finally {
+          setLoadingKey(false);
+        }
+      };
+      fetchApiKey();
+    }, []);
+
+    const { isLoaded, loadError } = useJsApiLoader({
+      googleMapsApiKey: apiKey || '',
+      id: 'google-map-script',
+    });
+
     // Flatten activities with their indices
     const activities: { item: ItineraryItem & { maps_query?: string }; index: number; block: string }[] = [];
     if (day) {
@@ -38,18 +87,113 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
       });
     }
 
-    // Position pins in a visually pleasing layout
-    const getPinPosition = (index: number, total: number) => {
-      const angle = (index / total) * 2 * Math.PI + Math.PI / 4;
-      const radius = 22 + (index % 3) * 7;
-      const centerX = 50;
-      const centerY = 50;
+    // Geocode locations when activities or map changes
+    useEffect(() => {
+      if (!isLoaded || !map || activities.length === 0) return;
+
+      const geocoder = new google.maps.Geocoder();
+      const newLocations = new Map<number, { lat: number; lng: number }>();
+
+      activities.forEach((activity, idx) => {
+        // Check if we have verified lat/lng
+        const verifiedFacts = activity.item.verified_facts;
+        if (verifiedFacts?.lat && verifiedFacts?.lng) {
+          newLocations.set(activity.index, { lat: verifiedFacts.lat, lng: verifiedFacts.lng });
+          if (idx === activities.length - 1) {
+            setGeocodedLocations(new Map(newLocations));
+          }
+          return;
+        }
+
+        // Otherwise geocode
+        const query = activity.item.maps_query || 
+          `${activity.item.title}, ${activity.item.location_area || ''}, ${destination || ''}`;
+        
+        geocoder.geocode({ address: query }, (results, status) => {
+          if (status === 'OK' && results && results[0]) {
+            const location = results[0].geometry.location;
+            newLocations.set(activity.index, { lat: location.lat(), lng: location.lng() });
+          }
+          
+          // Update state after all geocoding is done
+          if (idx === activities.length - 1) {
+            setTimeout(() => setGeocodedLocations(new Map(newLocations)), 100);
+          }
+        });
+      });
+    }, [isLoaded, map, day, destination]);
+
+    // Fit bounds when locations change
+    useEffect(() => {
+      if (!map || geocodedLocations.size === 0) return;
+
+      const bounds = new google.maps.LatLngBounds();
+      geocodedLocations.forEach((loc) => {
+        bounds.extend(new google.maps.LatLng(loc.lat, loc.lng));
+      });
       
-      return {
-        left: `${centerX + radius * Math.cos(angle)}%`,
-        top: `${centerY + radius * Math.sin(angle)}%`,
-      };
+      map.fitBounds(bounds, { top: 50, bottom: 80, left: 20, right: 20 });
+    }, [map, geocodedLocations]);
+
+    const onLoad = useCallback((map: google.maps.Map) => {
+      setMap(map);
+    }, []);
+
+    const onUnmount = useCallback(() => {
+      setMap(null);
+    }, []);
+
+    // Create custom marker icon
+    const createMarkerIcon = (color: string, label: string, isSelected: boolean) => {
+      const size = isSelected ? 36 : 28;
+      const svg = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+          <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="${color}" stroke="white" stroke-width="2"/>
+          <text x="${size/2}" y="${size/2 + 4}" text-anchor="middle" fill="white" font-size="${isSelected ? 14 : 11}" font-weight="bold" font-family="Arial">${label}</text>
+        </svg>
+      `;
+      return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
     };
+
+    // Loading state
+    if (loadingKey) {
+      return (
+        <div 
+          ref={ref}
+          className={cn(
+            'relative rounded-xl overflow-hidden',
+            'bg-card/60 backdrop-blur-sm border border-border/50',
+            'flex items-center justify-center',
+            className
+          )}
+        >
+          <div className="text-center p-8">
+            <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">Loading map...</p>
+          </div>
+        </div>
+      );
+    }
+
+    // No API key or error state
+    if (!apiKey || loadError) {
+      return (
+        <div 
+          ref={ref}
+          className={cn(
+            'relative rounded-xl overflow-hidden',
+            'bg-card/60 backdrop-blur-sm border border-border/50',
+            'flex items-center justify-center',
+            className
+          )}
+        >
+          <div className="text-center p-8">
+            <MapPin className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">Map not available</p>
+          </div>
+        </div>
+      );
+    }
 
     if (!day || activities.length === 0) {
       return (
@@ -83,17 +227,82 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
           className
         )}
       >
-        {/* Subtle grid pattern */}
-        <div className="absolute inset-0 opacity-10">
-          <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <pattern id="mapGrid" width="32" height="32" patternUnits="userSpaceOnUse">
-                <path d="M 32 0 L 0 0 0 32" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-border" />
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#mapGrid)" />
-          </svg>
-        </div>
+        {isLoaded ? (
+          <GoogleMap
+            mapContainerStyle={mapContainerStyle}
+            center={{ lat: 20.5937, lng: 78.9629 }} // Default to India center
+            zoom={5}
+            onLoad={onLoad}
+            onUnmount={onUnmount}
+            options={{
+              styles: darkMapStyle,
+              disableDefaultUI: true,
+              zoomControl: true,
+              mapTypeControl: false,
+              streetViewControl: false,
+              fullscreenControl: false,
+            }}
+          >
+            {activities.map((activity, idx) => {
+              const location = geocodedLocations.get(activity.index);
+              if (!location) return null;
+
+              const color = timeBlockPinColors[activity.block as keyof typeof timeBlockPinColors] || timeBlockPinColors.morning;
+              const isSelected = selectedActivityIndex === activity.index;
+
+              return (
+                <Marker
+                  key={activity.index}
+                  position={location}
+                  icon={{
+                    url: createMarkerIcon(color, String(idx + 1), isSelected),
+                    scaledSize: new google.maps.Size(isSelected ? 36 : 28, isSelected ? 36 : 28),
+                    anchor: new google.maps.Point(isSelected ? 18 : 14, isSelected ? 18 : 14),
+                  }}
+                  zIndex={isSelected ? 100 : 1}
+                  onClick={() => {
+                    onPinClick(activity.index);
+                    setSelectedMarker(activity.index);
+                  }}
+                />
+              );
+            })}
+
+            {selectedMarker !== null && (() => {
+              const activity = activities.find(a => a.index === selectedMarker);
+              const location = geocodedLocations.get(selectedMarker);
+              if (!activity || !location) return null;
+
+              return (
+                <InfoWindow
+                  position={location}
+                  onCloseClick={() => setSelectedMarker(null)}
+                >
+                  <div className="p-1 max-w-[200px]">
+                    <p className="font-medium text-sm text-gray-900">{activity.item.title}</p>
+                    {activity.item.location_area && (
+                      <p className="text-xs text-gray-600 mt-0.5">{activity.item.location_area}</p>
+                    )}
+                    {activity.item.maps_query && (
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activity.item.maps_query)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-blue-600 hover:underline mt-1 inline-flex items-center gap-1"
+                      >
+                        Open in Maps <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                </InfoWindow>
+              );
+            })()}
+          </GoogleMap>
+        ) : (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          </div>
+        )}
 
         {/* Day label */}
         <div className="absolute top-3 left-3 flex items-center gap-2 px-2.5 py-1 rounded-md bg-card/90 backdrop-blur-sm border border-border/50">
@@ -101,140 +310,16 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
           <span className="text-xs font-medium">Day {day.day}</span>
         </div>
 
-        {/* Connection lines */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none">
-          {activities.slice(0, -1).map((_, idx) => {
-            const pos1 = getPinPosition(idx, activities.length);
-            const pos2 = getPinPosition(idx + 1, activities.length);
-            return (
-              <line
-                key={idx}
-                x1={pos1.left}
-                y1={pos1.top}
-                x2={pos2.left}
-                y2={pos2.top}
-                stroke="hsl(var(--border))"
-                strokeWidth="1"
-                strokeDasharray="3 3"
-                opacity="0.4"
-              />
-            );
-          })}
-        </svg>
-
-        {/* Pins */}
-        {activities.map((activity, idx) => {
-          const position = getPinPosition(idx, activities.length);
-          const colors = timeBlockPinColors[activity.block as keyof typeof timeBlockPinColors] || timeBlockPinColors.morning;
-          const isSelected = selectedActivityIndex === activity.index;
-          const isHovered = hoveredPin === activity.index;
-
-          return (
-            <button
-              key={activity.index}
-              onClick={() => onPinClick(activity.index)}
-              onMouseEnter={() => setHoveredPin(activity.index)}
-              onMouseLeave={() => setHoveredPin(null)}
-              className={cn(
-                'absolute transform -translate-x-1/2 -translate-y-1/2',
-                'transition-all duration-200 ease-out',
-                'group z-10',
-                isSelected && 'z-20 scale-110',
-                isHovered && !isSelected && 'scale-105'
-              )}
-              style={{
-                left: position.left,
-                top: position.top,
-              }}
-            >
-              {/* Pin glow */}
-              {isSelected && (
-                <div 
-                  className="absolute inset-0 rounded-full blur-md opacity-50"
-                  style={{ backgroundColor: colors.bg }}
-                />
-              )}
-              
-              {/* Pin marker */}
-              <div 
-                className={cn(
-                  'relative w-8 h-8 rounded-full',
-                  'flex items-center justify-center',
-                  'border-2 shadow-md',
-                  'transition-all duration-200'
-                )}
-                style={{
-                  backgroundColor: colors.bg,
-                  borderColor: colors.border,
-                }}
-              >
-                <span className="text-xs font-bold text-white">
-                  {idx + 1}
-                </span>
-              </div>
-
-              {/* Tooltip on hover */}
-              {(isHovered || isSelected) && (
-                <div className={cn(
-                  'absolute top-full left-1/2 -translate-x-1/2 mt-2',
-                  'px-3 py-2 rounded-md',
-                  'bg-popover/95 backdrop-blur-sm border border-border',
-                  'shadow-lg min-w-[140px] max-w-[180px]',
-                  'animate-fade-in z-30'
-                )}>
-                  <p className="text-xs font-medium text-foreground truncate">
-                    {activity.item.title}
-                  </p>
-                  {activity.item.location_area && (
-                    <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                      {activity.item.location_area}
-                    </p>
-                  )}
-                </div>
-              )}
-            </button>
-          );
-        })}
-
-        {/* Selected pin detail bottom sheet */}
-        {selectedActivity && (
-          <div className="absolute bottom-3 left-3 right-3 p-3 rounded-lg bg-popover/95 backdrop-blur-sm border border-border animate-fade-in">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <p className="font-medium text-sm text-foreground truncate">
-                  {selectedActivity.item.title}
-                </p>
-                {selectedActivity.item.location_area && (
-                  <p className="text-xs text-muted-foreground truncate mt-0.5 flex items-center gap-1">
-                    <MapPin className="w-3 h-3" />
-                    {selectedActivity.item.location_area}
-                  </p>
-                )}
-              </div>
-              {selectedActivity.item.maps_query && (
-                <a
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(selectedActivity.item.maps_query)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-shrink-0 p-1.5 rounded-md bg-primary/10 hover:bg-primary/20 transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4 text-primary" />
-                </a>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Legend */}
-        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap justify-center gap-2" style={{ bottom: selectedActivity ? '70px' : '12px' }}>
-          {Object.entries(timeBlockPinColors).map(([block, colors]) => (
+        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap justify-center gap-2">
+          {Object.entries(timeBlockPinColors).map(([block, color]) => (
             <div 
               key={block}
               className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-card/80 backdrop-blur-sm"
             >
               <div 
                 className="w-2.5 h-2.5 rounded-full"
-                style={{ backgroundColor: colors.bg }}
+                style={{ backgroundColor: color }}
               />
               <span className="text-[10px] text-muted-foreground capitalize">{block}</span>
             </div>
