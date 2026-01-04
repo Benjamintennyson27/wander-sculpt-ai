@@ -1,22 +1,24 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserQuota } from '@/hooks/useUserQuota';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { 
   ArrowLeft, ArrowRight, Users, Wallet, Utensils, 
   Compass, Gauge, MapPin, Building, Calendar, Loader2,
-  Check, Plane
+  Check, Plane, Sparkles, Crown
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import TermsAcceptanceModal from '@/components/TermsAcceptanceModal';
+import { QuotaExceededModal } from '@/components/QuotaExceededModal';
 
 const INTERESTS = [
   { id: 'nature', label: 'Nature & Wildlife', icon: '🌿' },
@@ -64,11 +66,13 @@ const CURRENT_TERMS_VERSION = '1.0';
 
 export default function NewTrip() {
   const { user } = useAuth();
+  const { quota, loading: quotaLoading, canGenerate, getRemainingText, refetch: refetchQuota } = useUserQuota();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState<boolean | null>(null);
   
   const [formData, setFormData] = useState<TripFormData>({
@@ -136,7 +140,13 @@ export default function NewTrip() {
   const handleSubmit = async () => {
     if (!user) return;
     
-    // Check terms first
+    // Check quota first
+    if (!canGenerate) {
+      setShowQuotaModal(true);
+      return;
+    }
+    
+    // Check terms
     if (!termsAccepted) {
       setShowTermsModal(true);
       return;
@@ -179,29 +189,27 @@ export default function NewTrip() {
         body: { tripId: trip.id }
       });
 
-      // Handle TERMS_REQUIRED error
+      // Handle errors
       if (genError) {
         const errorBody = genData || {};
         if (errorBody.error === 'TERMS_REQUIRED') {
           setShowTermsModal(true);
           return;
         }
-        if (errorBody.error === 'RATE_LIMIT_EXCEEDED') {
-          toast({
-            variant: 'destructive',
-            title: 'Rate limit reached',
-            description: errorBody.message || 'Please try again later.'
-          });
+        if (errorBody.error === 'QUOTA_EXCEEDED') {
+          setShowQuotaModal(true);
           return;
         }
         console.error('Generation error:', genError);
         toast({
           variant: 'destructive',
           title: 'Generation started with issues',
-          description: 'Your trip was created but generation may take longer.'
+          description: errorBody.message || 'Your trip was created but generation may take longer.'
         });
       }
 
+      // Refetch quota after successful generation
+      refetchQuota();
       navigate(`/app/trip/${trip.id}`);
     } catch (error: unknown) {
       console.error('Error creating trip:', error);
@@ -541,16 +549,32 @@ export default function NewTrip() {
     <div className="min-h-screen">
       {/* Header */}
       <header className="border-b border-border/50 bg-background/80 backdrop-blur-xl sticky top-0 z-50">
-        <div className="container max-w-2xl mx-auto px-4 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/app')}>
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
-          <div>
-            <h1 className="font-display font-semibold">Plan New Trip</h1>
-            <p className="text-sm text-muted-foreground">
-              Step {currentStep + 1} of {STEPS.length}
-            </p>
+        <div className="container max-w-2xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => navigate('/app')}>
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <div>
+              <h1 className="font-display font-semibold">Plan New Trip</h1>
+              <p className="text-sm text-muted-foreground">
+                Step {currentStep + 1} of {STEPS.length}
+              </p>
+            </div>
           </div>
+          
+          {/* Usage Badge */}
+          {!quotaLoading && quota && (
+            <Badge 
+              variant={quota.isAdmin ? 'default' : quota.remaining === 0 ? 'destructive' : 'outline'} 
+              className="gap-1.5"
+            >
+              {quota.isAdmin ? (
+                <><Crown className="w-3 h-3" /> Admin</>
+              ) : (
+                <><Sparkles className="w-3 h-3" /> {getRemainingText()}</>
+              )}
+            </Badge>
+          )}
         </div>
       </header>
 
@@ -611,7 +635,7 @@ export default function NewTrip() {
           ) : (
             <Button
               onClick={handleSubmit}
-              disabled={!canProceed() || loading}
+              disabled={!canProceed() || loading || (!canGenerate && !quota?.isAdmin)}
               className="flex-1 bg-primary hover:bg-primary/90"
             >
               {loading ? (
@@ -632,6 +656,13 @@ export default function NewTrip() {
         open={showTermsModal}
         onAccept={handleTermsAccepted}
         onCancel={() => setShowTermsModal(false)}
+      />
+
+      {/* Quota Exceeded Modal */}
+      <QuotaExceededModal
+        open={showQuotaModal}
+        onOpenChange={setShowQuotaModal}
+        plan={quota?.plan || 'free'}
       />
     </div>
   );

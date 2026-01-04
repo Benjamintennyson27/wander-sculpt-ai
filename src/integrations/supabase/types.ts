@@ -64,6 +64,38 @@ export type Database = {
           },
         ]
       }
+      generation_events: {
+        Row: {
+          action: string
+          created_at: string | null
+          id: string
+          trip_id: string | null
+          user_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string | null
+          id?: string
+          trip_id?: string | null
+          user_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string | null
+          id?: string
+          trip_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "generation_events_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       itineraries: {
         Row: {
           cons: string[] | null
@@ -401,21 +433,51 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
+          current_period_end: string | null
+          current_period_start: string | null
+          email: string | null
           home_city: string | null
           id: string
+          lifetime_generations_used: number | null
           name: string | null
+          period_generations_used: number | null
+          plan: string | null
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          subscription_status: string | null
+          updated_at: string | null
         }
         Insert: {
           created_at?: string
+          current_period_end?: string | null
+          current_period_start?: string | null
+          email?: string | null
           home_city?: string | null
           id: string
+          lifetime_generations_used?: number | null
           name?: string | null
+          period_generations_used?: number | null
+          plan?: string | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_status?: string | null
+          updated_at?: string | null
         }
         Update: {
           created_at?: string
+          current_period_end?: string | null
+          current_period_start?: string | null
+          email?: string | null
           home_city?: string | null
           id?: string
+          lifetime_generations_used?: number | null
           name?: string | null
+          period_generations_used?: number | null
+          plan?: string | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_status?: string | null
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -767,6 +829,24 @@ export type Database = {
         }
         Relationships: []
       }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
       you_search_cache: {
         Row: {
           created_at: string
@@ -854,9 +934,25 @@ export type Database = {
           trip_id: string
         }[]
       }
+      get_user_quota: { Args: { p_user_id?: string }; Returns: Json }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      increment_lifetime_generations: {
+        Args: { p_user_id: string }
+        Returns: undefined
+      }
+      increment_period_generations: {
+        Args: { p_user_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "user" | "admin"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -983,6 +1079,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["user", "admin"],
+    },
   },
 } as const
