@@ -7,7 +7,6 @@ const corsHeaders = {
 };
 
 const CURRENT_TERMS_VERSION = '1.0';
-const RATE_LIMIT_PER_HOUR = 3;
 const MODEL_USED = 'google/gemini-2.5-flash';
 const MAX_DAY_RETRIES = 2;
 
@@ -285,47 +284,59 @@ function scoreItinerary(option: ItineraryOption, trip: TripData): number {
   return Math.min(100, Math.max(0, score));
 }
 
-async function checkRateLimit(supabase: SupabaseClient, userId: string): Promise<{ allowed: boolean; remaining: number }> {
-  const today = new Date().toISOString().split('T')[0];
-  
-  const { data: existing } = await supabase
-    .from('rate_limits')
-    .select('id, generation_count')
-    .eq('user_id', userId)
-    .eq('date', today)
-    .maybeSingle();
-
-  if (existing) {
-    const count = (existing as { id: string; generation_count: number }).generation_count;
-    const remaining = Math.max(0, RATE_LIMIT_PER_HOUR - count);
-    return { allowed: count < RATE_LIMIT_PER_HOUR, remaining };
-  }
-
-  await supabase.from('rate_limits').insert({
-    user_id: userId,
-    date: today,
-    generation_count: 0
-  } as Record<string, unknown>);
-
-  return { allowed: true, remaining: RATE_LIMIT_PER_HOUR };
+// New quota-based system
+interface QuotaInfo {
+  plan: string;
+  is_admin: boolean;
+  subscription_status: string;
+  limit_total: number;
+  used: number;
+  remaining: number;
 }
 
-async function incrementRateLimit(supabase: SupabaseClient, userId: string) {
-  const today = new Date().toISOString().split('T')[0];
+async function checkUserQuota(supabase: SupabaseClient, userId: string): Promise<{ allowed: boolean; remaining: number; quota: QuotaInfo }> {
+  const { data, error } = await supabase.rpc('get_user_quota', { p_user_id: userId });
   
-  const { data: existing } = await supabase
-    .from('rate_limits')
-    .select('id, generation_count')
-    .eq('user_id', userId)
-    .eq('date', today)
-    .maybeSingle();
+  if (error) {
+    console.error('[generate-itinerary] Quota check error:', error);
+    throw new Error('Failed to check generation quota');
+  }
+  
+  const quota = data as QuotaInfo;
+  
+  // Admin always allowed
+  if (quota.is_admin) {
+    return { allowed: true, remaining: -1, quota };
+  }
+  
+  return { 
+    allowed: quota.remaining > 0, 
+    remaining: quota.remaining,
+    quota 
+  };
+}
 
-  if (existing) {
-    const record = existing as { id: string; generation_count: number };
-    await supabase
-      .from('rate_limits')
-      .update({ generation_count: record.generation_count + 1 } as Record<string, unknown>)
-      .eq('id', record.id);
+async function incrementGenerationCounter(supabase: SupabaseClient, userId: string, tripId: string, quota: QuotaInfo) {
+  // Insert generation event for audit
+  await supabase.from('generation_events').insert({
+    user_id: userId,
+    trip_id: tripId,
+    action: 'generate'
+  });
+  
+  // Don't increment for admins
+  if (quota.is_admin) {
+    console.log('[generate-itinerary] Admin user, skipping counter increment');
+    return;
+  }
+  
+  // Increment the appropriate counter based on plan
+  if (quota.plan === 'pro' && (quota.subscription_status === 'active' || quota.subscription_status === 'trialing')) {
+    // Pro user: increment period counter
+    await supabase.rpc('increment_period_generations', { p_user_id: userId });
+  } else {
+    // Free user: increment lifetime counter
+    await supabase.rpc('increment_lifetime_generations', { p_user_id: userId });
   }
 }
 
@@ -679,15 +690,18 @@ serve(async (req) => {
       });
     }
 
-    // Check rate limit
-    const { allowed, remaining } = await checkRateLimit(supabase, userId);
+    // Check quota (replaces old rate limit)
+    const { allowed, remaining, quota } = await checkUserQuota(supabase, userId);
     if (!allowed) {
       return new Response(JSON.stringify({
-        error: 'RATE_LIMIT_EXCEEDED',
-        message: `You have reached the limit of ${RATE_LIMIT_PER_HOUR} generations per day.`,
-        remaining: 0
+        error: 'QUOTA_EXCEEDED',
+        message: quota.plan === 'free' 
+          ? 'You have used your free generation. Upgrade to Pro for 10 generations per month.'
+          : 'You have used all your generations this month. Your quota resets at the start of your next billing period.',
+        remaining: 0,
+        plan: quota.plan
       }), {
-        status: 429,
+        status: 402,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -928,8 +942,8 @@ ${notes ? `- Additional notes: ${notes}` : ''}`;
       duration_days: days
     } as Record<string, unknown>).eq('id', tripId);
 
-    // Increment rate limit
-    await incrementRateLimit(supabase, userId);
+    // Increment generation counter (after successful save)
+    await incrementGenerationCounter(supabase, userId, tripId, quota);
 
     console.log(`[generate-itinerary] Successfully generated ${savedItineraries.length} itineraries`);
 

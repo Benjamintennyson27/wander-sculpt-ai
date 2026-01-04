@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { UsageBadge } from '@/components/UsageBadge';
 import { 
   Plane, Plus, MapPin, Calendar, Users, 
   ChevronRight, LogOut, Settings
@@ -70,6 +71,7 @@ export default function Dashboard() {
           </Link>
           
           <div className="flex items-center gap-3">
+            <UsageBadge />
             <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
               <Settings className="w-5 h-5" />
             </Button>
