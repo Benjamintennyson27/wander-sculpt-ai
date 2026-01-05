@@ -1,9 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { verifyAuth, verifyTripOwnership, corsHeaders, unauthorizedResponse, forbiddenResponse } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// Input validation schema
+const RequestSchema = z.object({
+  tripId: z.string().uuid(),
+});
 
 interface ItineraryItem {
   id: string;
@@ -51,38 +53,46 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // 1. Verify authentication
+    const authResult = await verifyAuth(req);
+    if (!authResult.success) {
+      console.log('[verify-trip-places] Auth failed:', authResult.error);
+      return unauthorizedResponse(authResult.error, authResult.status);
+    }
+    
+    const userId = authResult.user.id;
+    console.log('[verify-trip-places] Authenticated user:', userId);
+
+    // 2. Parse and validate input
+    const rawBody = await req.json();
+    const parseResult = RequestSchema.safeParse(rawBody);
+    
+    if (!parseResult.success) {
+      console.log('[verify-trip-places] Validation failed:', parseResult.error.issues);
+      return new Response(
+        JSON.stringify({ error: "Invalid input", details: parseResult.error.issues }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    const { tripId } = parseResult.data;
+
+    // 3. Verify trip ownership
+    const ownershipResult = await verifyTripOwnership(tripId, userId);
+    if (!ownershipResult.owned) {
+      console.log('[verify-trip-places] Ownership check failed:', ownershipResult.error);
+      return forbiddenResponse(ownershipResult.error);
+    }
+    
+    const trip = ownershipResult.trip!;
+    console.log(`[verify-trip-places] Starting batch verification for trip: ${tripId}`);
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { tripId } = await req.json();
-
-    if (!tripId) {
-      return new Response(
-        JSON.stringify({ error: 'tripId is required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log(`Starting batch verification for trip: ${tripId}`);
-
-    // Get trip details for location context
-    const { data: trip, error: tripError } = await supabase
-      .from('trips')
-      .select('destination')
-      .eq('id', tripId)
-      .single();
-
-    if (tripError || !trip) {
-      console.error('Trip fetch error:', tripError);
-      return new Response(
-        JSON.stringify({ error: 'Trip not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
     // Parse destination (format: "City, State, Country" or "City, Country")
-    const destParts = trip.destination.split(',').map((s: string) => s.trim());
+    const destParts = String(trip.destination).split(',').map((s: string) => s.trim());
     const city = destParts[0] || '';
     const country = destParts[destParts.length - 1] || '';
     const state = destParts.length > 2 ? destParts[1] : undefined;
@@ -103,7 +113,7 @@ Deno.serve(async (req) => {
       .eq('trip_id', tripId);
 
     if (itinError) {
-      console.error('Itineraries fetch error:', itinError);
+      console.error('[verify-trip-places] Itineraries fetch error:', itinError);
       return new Response(
         JSON.stringify({ error: 'Failed to fetch itineraries' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -113,25 +123,25 @@ Deno.serve(async (req) => {
     // Extract all items from all itineraries
     const items: ItineraryItem[] = [];
     for (const itinerary of itineraries || []) {
-      const days = itinerary.days as any[] || [];
+      const days = itinerary.days as Record<string, unknown>[] || [];
       for (const day of days) {
-        const dayItems = day.items || [];
+        const dayItems = (day.items as Record<string, unknown>[]) || [];
         for (let itemIdx = 0; itemIdx < dayItems.length; itemIdx++) {
           const item = dayItems[itemIdx];
-          if (item.title && !shouldSkipItem(item.title)) {
+          if (item.title && !shouldSkipItem(String(item.title))) {
             // Generate a stable ID from itinerary + day + item index if not present
             const itemId = item.id || `${itinerary.id}-d${day.day || 0}-i${itemIdx}`;
             items.push({
-              id: itemId,
-              title: item.title,
-              location_area: item.location_area || null,
+              id: String(itemId),
+              title: String(item.title),
+              location_area: item.location_area ? String(item.location_area) : null,
             });
           }
         }
       }
     }
 
-    console.log(`Found ${items.length} items to verify`);
+    console.log(`[verify-trip-places] Found ${items.length} items to verify`);
 
     // Check which items already have verifications
     const { data: existingVerifications } = await supabase
@@ -142,7 +152,7 @@ Deno.serve(async (req) => {
     const verifiedIds = new Set((existingVerifications || []).map(v => v.itinerary_item_id));
     const itemsToVerify = items.filter(item => !verifiedIds.has(item.id));
 
-    console.log(`${itemsToVerify.length} items need verification (${verifiedIds.size} already done)`);
+    console.log(`[verify-trip-places] ${itemsToVerify.length} items need verification (${verifiedIds.size} already done)`);
 
     // Batch verify with rate limiting
     const results = {
@@ -155,6 +165,7 @@ Deno.serve(async (req) => {
 
     const BATCH_SIZE = 3;
     const DELAY_BETWEEN_BATCHES = 1000; // 1 second
+    const authHeader = req.headers.get("Authorization");
 
     for (let i = 0; i < itemsToVerify.length; i += BATCH_SIZE) {
       const batch = itemsToVerify.slice(i, i + BATCH_SIZE);
@@ -166,7 +177,7 @@ Deno.serve(async (req) => {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${supabaseServiceKey}`,
+              'Authorization': authHeader || `Bearer ${supabaseServiceKey}`,
             },
             body: JSON.stringify({
               tripId,
@@ -180,16 +191,16 @@ Deno.serve(async (req) => {
           });
 
           if (!response.ok) {
-            console.error(`Verification failed for ${item.title}:`, await response.text());
+            console.error(`[verify-trip-places] Verification failed for ${item.title}:`, await response.text());
             results.failed++;
             return;
           }
 
           const result = await response.json();
           results[result.status as keyof typeof results]++;
-          console.log(`Verified "${item.title}": ${result.status} (${result.quality_score})`);
+          console.log(`[verify-trip-places] Verified "${item.title}": ${result.status} (${result.quality_score})`);
         } catch (error) {
-          console.error(`Error verifying ${item.title}:`, error);
+          console.error(`[verify-trip-places] Error verifying ${item.title}:`, error);
           results.failed++;
         }
       });
@@ -202,7 +213,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    console.log(`Batch verification complete:`, results);
+    console.log(`[verify-trip-places] Batch verification complete:`, results);
 
     return new Response(
       JSON.stringify({
@@ -215,7 +226,7 @@ Deno.serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('verify-trip-places error:', error);
+    console.error('[verify-trip-places] Error:', error);
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
