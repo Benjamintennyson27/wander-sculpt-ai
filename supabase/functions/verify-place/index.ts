@@ -1,19 +1,17 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { verifyAuth, verifyTripOwnership, corsHeaders, unauthorizedResponse, forbiddenResponse } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-interface VerifyPlaceRequest {
-  tripId: string;
-  itineraryItemId: string;
-  placeText: string;
-  city: string;
-  state?: string;
-  country: string;
-  mode?: 'fast' | 'balanced' | 'strict';
-}
+// Input validation schema
+const RequestSchema = z.object({
+  tripId: z.string().uuid(),
+  itineraryItemId: z.string().min(1).max(200),
+  placeText: z.string().min(1).max(500),
+  city: z.string().min(1).max(200),
+  state: z.string().max(200).optional(),
+  country: z.string().min(1).max(200),
+  mode: z.enum(['fast', 'balanced', 'strict']).optional(),
+});
 
 interface SearchResult {
   title: string;
@@ -82,7 +80,7 @@ async function searchYou(query: string, apiKey: string): Promise<SearchResult[]>
   youApiUrl.searchParams.set('query', query);
   youApiUrl.searchParams.set('count', '5');
   
-  console.log(`Searching YOU API: ${query}`);
+  console.log(`[verify-place] Searching YOU API: ${query}`);
   
   const response = await fetch(youApiUrl.toString(), {
     method: 'GET',
@@ -92,7 +90,7 @@ async function searchYou(query: string, apiKey: string): Promise<SearchResult[]>
   });
   
   if (!response.ok) {
-    console.error('YOU API error:', response.status, await response.text());
+    console.error('[verify-place] YOU API error:', response.status, await response.text());
     return [];
   }
   
@@ -145,7 +143,7 @@ function calculateQualityScore(
   }
   
   let score = 0;
-  let reasons: string[] = [];
+  const reasons: string[] = [];
   
   // Base score from matching results
   score += Math.min(40, matchingResults * 10);
@@ -194,30 +192,51 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // 1. Verify authentication
+    const authResult = await verifyAuth(req);
+    if (!authResult.success) {
+      console.log('[verify-place] Auth failed:', authResult.error);
+      return unauthorizedResponse(authResult.error, authResult.status);
+    }
+    
+    const userId = authResult.user.id;
+    console.log('[verify-place] Authenticated user:', userId);
+
     const YOU_API_KEY = Deno.env.get('YOU_API_KEY');
     if (!YOU_API_KEY) {
-      console.error('YOU_API_KEY not configured');
+      console.error('[verify-place] YOU_API_KEY not configured');
       return new Response(
         JSON.stringify({ error: 'Search API not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    const body: VerifyPlaceRequest = await req.json();
-    const { tripId, itineraryItemId, placeText, city, state, country, mode = 'balanced' } = body;
-
-    if (!tripId || !itineraryItemId || !placeText || !city || !country) {
+    // 2. Parse and validate input
+    const rawBody = await req.json();
+    const parseResult = RequestSchema.safeParse(rawBody);
+    
+    if (!parseResult.success) {
+      console.log('[verify-place] Validation failed:', parseResult.error.issues);
       return new Response(
-        JSON.stringify({ error: 'Missing required fields' }),
+        JSON.stringify({ error: "Invalid input", details: parseResult.error.issues }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    
+    const { tripId, itineraryItemId, placeText, city, state, country, mode = 'balanced' } = parseResult.data;
 
-    console.log(`Verifying place: "${placeText}" in ${city}, ${country}`);
+    // 3. Verify trip ownership
+    const ownershipResult = await verifyTripOwnership(tripId, userId);
+    if (!ownershipResult.owned) {
+      console.log('[verify-place] Ownership check failed:', ownershipResult.error);
+      return forbiddenResponse(ownershipResult.error);
+    }
+
+    console.log(`[verify-place] Verifying place: "${placeText}" in ${city}, ${country}`);
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Build search queries
     const locationStr = state ? `${city} ${state} ${country}` : `${city} ${country}`;
@@ -304,7 +323,7 @@ Deno.serve(async (req) => {
       });
 
     if (upsertError) {
-      console.error('Upsert error:', upsertError);
+      console.error('[verify-place] Upsert error:', upsertError);
       return new Response(
         JSON.stringify({ error: 'Failed to save verification', details: upsertError.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -328,7 +347,7 @@ Deno.serve(async (req) => {
         });
     }
 
-    console.log(`Verification complete: ${status} (score: ${score})`);
+    console.log(`[verify-place] Verification complete: ${status} (score: ${score})`);
 
     const result: VerificationResult = {
       status,
@@ -347,7 +366,7 @@ Deno.serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('verify-place error:', error);
+    console.error('[verify-place] Error:', error);
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

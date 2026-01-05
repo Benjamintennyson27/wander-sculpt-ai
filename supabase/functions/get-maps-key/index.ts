@@ -1,9 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { verifyAuth, corsHeaders, unauthorizedResponse } from "../_shared/auth.ts";
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -11,6 +7,15 @@ serve(async (req) => {
   }
 
   try {
+    // Verify authentication
+    const authResult = await verifyAuth(req);
+    if (!authResult.success) {
+      console.log('[get-maps-key] Auth failed:', authResult.error);
+      return unauthorizedResponse(authResult.error, authResult.status);
+    }
+    
+    console.log('[get-maps-key] Authenticated user:', authResult.user.id);
+
     const apiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
     
     if (!apiKey) {
@@ -25,7 +30,7 @@ serve(async (req) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
-    console.error('Error:', error);
+    console.error('[get-maps-key] Error:', error);
     return new Response(
       JSON.stringify({ error: 'Failed to get API key' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

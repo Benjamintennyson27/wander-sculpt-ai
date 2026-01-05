@@ -1,14 +1,17 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { verifyAuth, verifyTripOwnership, corsHeaders, unauthorizedResponse, forbiddenResponse } from "../_shared/auth.ts";
 
 const CURRENT_TERMS_VERSION = '1.0';
 const MODEL_USED = 'google/gemini-2.5-flash';
 const MAX_DAY_RETRIES = 2;
+
+// Input validation schema
+const RequestSchema = z.object({
+  tripId: z.string().uuid(),
+});
+
 
 interface TripInput {
   tripId: string;
@@ -654,28 +657,44 @@ serve(async (req) => {
   }
 
   try {
-    const input = validateInput(await req.json());
-    const { tripId } = input;
+    // 1. Verify authentication
+    const authResult = await verifyAuth(req);
+    if (!authResult.success) {
+      console.log('[generate-itinerary] Auth failed:', authResult.error);
+      return unauthorizedResponse(authResult.error, authResult.status);
+    }
+    
+    const authenticatedUserId = authResult.user.id;
+    console.log('[generate-itinerary] Authenticated user:', authenticatedUserId);
+
+    // 2. Parse and validate input
+    const rawBody = await req.json();
+    const parseResult = RequestSchema.safeParse(rawBody);
+    
+    if (!parseResult.success) {
+      console.log('[generate-itinerary] Validation failed:', parseResult.error.issues);
+      return new Response(
+        JSON.stringify({ error: "Invalid input", details: parseResult.error.issues }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    const { tripId } = parseResult.data;
+
+    // 3. Verify trip ownership
+    const ownershipResult = await verifyTripOwnership(tripId, authenticatedUserId);
+    if (!ownershipResult.owned) {
+      console.log('[generate-itinerary] Ownership check failed:', ownershipResult.error);
+      return forbiddenResponse(ownershipResult.error);
+    }
+    
+    const tripData = ownershipResult.trip!;
+    const userId = tripData.user_id as string;
+    console.log(`[generate-itinerary] Starting for trip ${tripId}, user ${userId}`);
     
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Fetch trip details
-    const { data: trip, error: tripError } = await supabase
-      .from('trips')
-      .select('*')
-      .eq('id', tripId)
-      .single();
-
-    if (tripError || !trip) {
-      console.error('[generate-itinerary] Trip not found:', tripError);
-      throw new Error('Trip not found');
-    }
-
-    const tripData = trip as Record<string, unknown>;
-    const userId = tripData.user_id as string;
-    console.log(`[generate-itinerary] Starting for trip ${tripId}, user ${userId}`);
 
     // Check terms acceptance
     const termsAccepted = await checkTermsAccepted(supabase, userId);

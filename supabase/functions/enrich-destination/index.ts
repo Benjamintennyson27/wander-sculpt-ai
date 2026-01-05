@@ -1,22 +1,20 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { verifyAuth, verifyTripOwnership, corsHeaders, unauthorizedResponse, forbiddenResponse } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-interface EnrichInput {
-  tripId: string;
-  destination: string;
-  tripType: string; // family, solo, friends, couple
-  foodPreference: string; // local, street-food, restaurants, mixed
-  interests: string[];
-}
+// Input validation schema
+const RequestSchema = z.object({
+  tripId: z.string().uuid(),
+  destination: z.string().min(2).max(200),
+  tripType: z.string().max(50).optional(),
+  foodPreference: z.string().max(50).optional(),
+  interests: z.array(z.string().max(100)).max(20).optional(),
+});
 
 interface Attraction {
   name: string;
-  type: string; // temple, beach, museum, park, etc.
+  type: string;
   area: string;
   reason: string;
   maps_query: string;
@@ -34,26 +32,6 @@ interface FoodSpot {
 interface EnrichmentResult {
   attractions: Attraction[];
   food_spots: FoodSpot[];
-}
-
-function validateInput(data: unknown): EnrichInput {
-  if (!data || typeof data !== 'object') throw new Error('Invalid input');
-  const obj = data as Record<string, unknown>;
-  
-  if (typeof obj.tripId !== 'string' || !obj.tripId.match(/^[0-9a-f-]{36}$/)) {
-    throw new Error('Invalid tripId format');
-  }
-  if (typeof obj.destination !== 'string' || obj.destination.length < 2) {
-    throw new Error('Invalid destination');
-  }
-  
-  return {
-    tripId: obj.tripId,
-    destination: obj.destination,
-    tripType: (obj.tripType as string) || 'mixed',
-    foodPreference: (obj.foodPreference as string) || 'mixed',
-    interests: Array.isArray(obj.interests) ? obj.interests : [],
-  };
 }
 
 async function fetchWithYouSearch(query: string): Promise<{ results: { title: string; snippet: string; url: string }[] }> {
@@ -205,8 +183,36 @@ serve(async (req) => {
   }
 
   try {
-    const input = validateInput(await req.json());
-    const { tripId, destination, tripType, foodPreference, interests } = input;
+    // 1. Verify authentication
+    const authResult = await verifyAuth(req);
+    if (!authResult.success) {
+      console.log('[enrich-destination] Auth failed:', authResult.error);
+      return unauthorizedResponse(authResult.error, authResult.status);
+    }
+    
+    const userId = authResult.user.id;
+    console.log('[enrich-destination] Authenticated user:', userId);
+
+    // 2. Parse and validate input
+    const rawBody = await req.json();
+    const parseResult = RequestSchema.safeParse(rawBody);
+    
+    if (!parseResult.success) {
+      console.log('[enrich-destination] Validation failed:', parseResult.error.issues);
+      return new Response(
+        JSON.stringify({ error: "Invalid input", details: parseResult.error.issues }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    const { tripId, destination, tripType = 'mixed', foodPreference = 'mixed', interests = [] } = parseResult.data;
+
+    // 3. Verify trip ownership
+    const ownershipResult = await verifyTripOwnership(tripId, userId);
+    if (!ownershipResult.owned) {
+      console.log('[enrich-destination] Ownership check failed:', ownershipResult.error);
+      return forbiddenResponse(ownershipResult.error);
+    }
     
     console.log(`[enrich-destination] Starting enrichment for ${destination}, trip ${tripId}`);
     

@@ -1,21 +1,17 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { verifyAuth, verifyTripOwnership, corsHeaders, unauthorizedResponse, forbiddenResponse } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// Input validation schema
+const RequestSchema = z.object({
+  trip_id: z.string().uuid(),
+  option_id: z.string().uuid(),
+});
 
 interface SearchResult {
   title: string;
   url: string;
   snippet: string;
-}
-
-interface ItineraryItem {
-  id: string;
-  title: string;
-  location_area: string | null;
-  description: string | null;
 }
 
 interface ExtractedFacts {
@@ -27,7 +23,7 @@ interface ExtractedFacts {
 }
 
 // Extract structured facts from search snippets
-function extractFactsFromResults(results: SearchResult[], placeName: string): ExtractedFacts {
+function extractFactsFromResults(results: SearchResult[], _placeName: string): ExtractedFacts {
   if (!results || results.length === 0) {
     return {
       verified_note: null,
@@ -118,40 +114,45 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // 1. Verify authentication
+    const authResult = await verifyAuth(req);
+    if (!authResult.success) {
+      console.log('[enrich-itinerary] Auth failed:', authResult.error);
+      return unauthorizedResponse(authResult.error, authResult.status);
+    }
+    
+    const userId = authResult.user.id;
+    console.log('[enrich-itinerary] Authenticated user:', userId);
+
+    // 2. Parse and validate input
+    const rawBody = await req.json();
+    const parseResult = RequestSchema.safeParse(rawBody);
+    
+    if (!parseResult.success) {
+      console.log('[enrich-itinerary] Validation failed:', parseResult.error.issues);
+      return new Response(
+        JSON.stringify({ error: "Invalid input", details: parseResult.error.issues }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    const { trip_id, option_id } = parseResult.data;
+
+    // 3. Verify trip ownership
+    const ownershipResult = await verifyTripOwnership(trip_id, userId);
+    if (!ownershipResult.owned) {
+      console.log('[enrich-itinerary] Ownership check failed:', ownershipResult.error);
+      return forbiddenResponse(ownershipResult.error);
+    }
+    
+    const trip = ownershipResult.trip!;
+    console.log(`[enrich-itinerary] Enriching itinerary for trip ${trip_id}, option ${option_id}`);
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get auth header to pass to you-search
-    const authHeader = req.headers.get('authorization');
-
-    const { trip_id, option_id } = await req.json();
-
-    if (!trip_id || !option_id) {
-      return new Response(
-        JSON.stringify({ error: 'trip_id and option_id are required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log(`Enriching itinerary for trip ${trip_id}, option ${option_id}`);
-
-    // Fetch trip destination
-    const { data: trip, error: tripError } = await supabase
-      .from('trips')
-      .select('destination')
-      .eq('id', trip_id)
-      .single();
-
-    if (tripError || !trip) {
-      console.error('Trip fetch error:', tripError);
-      return new Response(
-        JSON.stringify({ error: 'Trip not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const destination = trip.destination;
+    const destination = String(trip.destination);
 
     // Fetch itinerary and its items through the JSON days structure
     const { data: itinerary, error: itineraryError } = await supabase
@@ -162,7 +163,7 @@ Deno.serve(async (req) => {
       .single();
 
     if (itineraryError || !itinerary) {
-      console.error('Itinerary fetch error:', itineraryError);
+      console.error('[enrich-itinerary] Itinerary fetch error:', itineraryError);
       return new Response(
         JSON.stringify({ error: 'Itinerary not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -170,23 +171,23 @@ Deno.serve(async (req) => {
     }
 
     // Parse days JSON and extract items to enrich
-    const days = itinerary.days as any[];
+    const days = itinerary.days as Record<string, unknown>[];
     const itemsToEnrich: { dayIdx: number; itemIdx: number; title: string; location_area: string | null }[] = [];
 
     for (let dayIdx = 0; dayIdx < days.length; dayIdx++) {
       const day = days[dayIdx];
-      const items = day.items || [];
+      const items = (day.items as Record<string, unknown>[]) || [];
       for (let itemIdx = 0; itemIdx < items.length; itemIdx++) {
         const item = items[itemIdx];
         // Skip free time or empty items
-        if (item.title?.toLowerCase().includes('free time')) continue;
+        if (String(item.title || '').toLowerCase().includes('free time')) continue;
         if (!item.title) continue;
         
         itemsToEnrich.push({
           dayIdx,
           itemIdx,
-          title: item.title,
-          location_area: item.location_area || null
+          title: String(item.title),
+          location_area: item.location_area ? String(item.location_area) : null
         });
       }
     }
@@ -195,13 +196,15 @@ Deno.serve(async (req) => {
     const enrichLimit = 12;
     const itemsToProcess = itemsToEnrich.slice(0, enrichLimit);
 
-    console.log(`Processing ${itemsToProcess.length} items for enrichment`);
+    console.log(`[enrich-itinerary] Processing ${itemsToProcess.length} items for enrichment`);
 
     const enrichedItems: Array<{
       dayIdx: number;
       itemIdx: number;
       facts: ExtractedFacts;
     }> = [];
+
+    const authHeader = req.headers.get('authorization');
 
     // Process items sequentially to respect rate limits
     for (const item of itemsToProcess) {
@@ -210,7 +213,7 @@ Deno.serve(async (req) => {
         const locationPart = item.location_area ? ` ${item.location_area}` : '';
         const query = `${destination}${locationPart} ${item.title} opening hours ticket price closed day best time to visit`;
 
-        console.log(`Searching for: ${item.title}`);
+        console.log(`[enrich-itinerary] Searching for: ${item.title}`);
 
         // Call you-search function
         const searchResponse = await fetch(`${supabaseUrl}/functions/v1/you-search`, {
@@ -224,11 +227,11 @@ Deno.serve(async (req) => {
 
         if (!searchResponse.ok) {
           const errorText = await searchResponse.text();
-          console.error(`Search failed for "${item.title}":`, errorText);
+          console.error(`[enrich-itinerary] Search failed for "${item.title}":`, errorText);
           
           // If rate limited, stop processing
           if (searchResponse.status === 429) {
-            console.log('Rate limit hit, stopping enrichment');
+            console.log('[enrich-itinerary] Rate limit hit, stopping enrichment');
             break;
           }
           continue;
@@ -250,7 +253,7 @@ Deno.serve(async (req) => {
         await new Promise(resolve => setTimeout(resolve, 200));
 
       } catch (error) {
-        console.error(`Error enriching item "${item.title}":`, error);
+        console.error(`[enrich-itinerary] Error enriching item "${item.title}":`, error);
       }
     }
 
@@ -258,9 +261,10 @@ Deno.serve(async (req) => {
     const updatedDays = [...days];
     
     for (const enriched of enrichedItems) {
-      const day = updatedDays[enriched.dayIdx];
-      if (day && day.items && day.items[enriched.itemIdx]) {
-        day.items[enriched.itemIdx].verified_facts = enriched.facts;
+      const day = updatedDays[enriched.dayIdx] as Record<string, unknown>;
+      const items = day.items as Record<string, unknown>[];
+      if (day && items && items[enriched.itemIdx]) {
+        items[enriched.itemIdx].verified_facts = enriched.facts;
       }
     }
 
@@ -271,14 +275,14 @@ Deno.serve(async (req) => {
       .eq('id', option_id);
 
     if (updateError) {
-      console.error('Failed to update itinerary:', updateError);
+      console.error('[enrich-itinerary] Failed to update itinerary:', updateError);
       return new Response(
         JSON.stringify({ error: 'Failed to save enriched data' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Successfully enriched ${enrichedItems.length} items`);
+    console.log(`[enrich-itinerary] Successfully enriched ${enrichedItems.length} items`);
 
     return new Response(
       JSON.stringify({ 
@@ -290,7 +294,7 @@ Deno.serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('enrich-itinerary error:', error);
+    console.error('[enrich-itinerary] Error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: errorMessage }),

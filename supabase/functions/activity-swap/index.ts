@@ -1,10 +1,30 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { verifyAuth, verifyTripOwnership, corsHeaders, unauthorizedResponse, forbiddenResponse } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Input validation schema
+const NewItemSchema = z.object({
+  title: z.string().min(1).max(200),
+  description: z.string().max(1000).optional(),
+  location_text: z.string().max(200).optional(),
+  area: z.string().max(200).optional(),
+  duration_minutes: z.number().int().min(0).max(1440).optional(),
+  estimated_cost_min: z.number().int().min(0).max(10000000).optional(),
+  estimated_cost_max: z.number().int().min(0).max(10000000).optional(),
+  kid_friendly: z.boolean().optional(),
+  food_related: z.boolean().optional(),
+  maps_query: z.string().max(300).optional(),
+});
+
+const RequestSchema = z.object({
+  trip_id: z.string().uuid(),
+  itinerary_id: z.string().uuid().optional(),
+  day_number: z.number().int().min(1).max(30),
+  item_index: z.number().int().min(0).max(50),
+  new_item: NewItemSchema,
+  auto_verify: z.boolean().optional(),
+});
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -12,35 +32,51 @@ serve(async (req) => {
   }
 
   try {
-    const { trip_id, itinerary_id, day_number, item_index, new_item, auto_verify } = await req.json();
+    // 1. Verify authentication
+    const authResult = await verifyAuth(req);
+    if (!authResult.success) {
+      console.log('[activity-swap] Auth failed:', authResult.error);
+      return unauthorizedResponse(authResult.error, authResult.status);
+    }
     
-    if (!trip_id || day_number === undefined || item_index === undefined || !new_item) {
+    const userId = authResult.user.id;
+    console.log('[activity-swap] Authenticated user:', userId);
+
+    // 2. Parse and validate input
+    const rawBody = await req.json();
+    const parseResult = RequestSchema.safeParse(rawBody);
+    
+    if (!parseResult.success) {
+      console.log('[activity-swap] Validation failed:', parseResult.error.issues);
       return new Response(
-        JSON.stringify({ error: "trip_id, day_number, item_index, and new_item are required" }),
+        JSON.stringify({ error: "Invalid input", details: parseResult.error.issues }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    
+    const { trip_id, itinerary_id, day_number, item_index, new_item, auto_verify } = parseResult.data;
+
+    // 3. Verify trip ownership
+    const ownershipResult = await verifyTripOwnership(trip_id, userId);
+    if (!ownershipResult.owned) {
+      console.log('[activity-swap] Ownership check failed:', ownershipResult.error);
+      return forbiddenResponse(ownershipResult.error);
+    }
+    
+    const trip = ownershipResult.trip!;
+    console.log('[activity-swap] Trip ownership verified for:', trip_id);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
     const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Get trip details
-    const { data: trip, error: tripError } = await supabase
-      .from("trips")
-      .select("*")
-      .eq("id", trip_id)
-      .single();
-
-    if (tripError || !trip) {
-      throw new Error(`Trip not found: ${tripError?.message}`);
-    }
 
     // Get itinerary - use provided itinerary_id or fall back to selected_itinerary_id
     const targetItineraryId = itinerary_id || trip.selected_itinerary_id;
     if (!targetItineraryId) {
-      throw new Error("No itinerary specified. Please select an itinerary option first.");
+      return new Response(
+        JSON.stringify({ error: "No itinerary specified. Please select an itinerary option first." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const { data: itinerary, error: itinError } = await supabase
@@ -50,21 +86,30 @@ serve(async (req) => {
       .single();
 
     if (itinError || !itinerary) {
-      throw new Error(`Itinerary not found: ${itinError?.message}`);
+      return new Response(
+        JSON.stringify({ error: `Itinerary not found: ${itinError?.message}` }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const days = [...(itinerary.days || [])];
     const dayIdx = day_number - 1;
     
     if (dayIdx < 0 || dayIdx >= days.length) {
-      throw new Error(`Invalid day number: ${day_number}`);
+      return new Response(
+        JSON.stringify({ error: `Invalid day number: ${day_number}` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const day = days[dayIdx];
     const items = [...(day.items || [])];
     
     if (item_index < 0 || item_index >= items.length) {
-      throw new Error(`Invalid item index: ${item_index}`);
+      return new Response(
+        JSON.stringify({ error: `Invalid item index: ${item_index}` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const oldItem = items[item_index];
@@ -94,8 +139,11 @@ serve(async (req) => {
       .eq("id", targetItineraryId);
 
     if (updateError) {
-      console.error("Failed to update itinerary:", updateError);
-      throw new Error("Failed to swap activity");
+      console.error("[activity-swap] Failed to update itinerary:", updateError);
+      return new Response(
+        JSON.stringify({ error: "Failed to swap activity" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     // Log the edit
@@ -114,11 +162,11 @@ serve(async (req) => {
     // Optionally trigger verification for the new item
     if (auto_verify) {
       try {
-        // Call verify-place for just this item
+        const authHeader = req.headers.get("Authorization");
         const verifyResponse = await fetch(`${supabaseUrl}/functions/v1/verify-place`, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${supabaseKey}`,
+            Authorization: authHeader || `Bearer ${supabaseKey}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -130,10 +178,10 @@ serve(async (req) => {
         });
         
         if (!verifyResponse.ok) {
-          console.warn("Auto-verify failed, but swap completed");
+          console.warn("[activity-swap] Auto-verify failed, but swap completed");
         }
       } catch (e) {
-        console.warn("Auto-verify error:", e);
+        console.warn("[activity-swap] Auto-verify error:", e);
       }
     }
 
@@ -149,7 +197,7 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error("Swap error:", error);
+    console.error("[activity-swap] Error:", error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

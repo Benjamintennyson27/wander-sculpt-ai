@@ -1,10 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { verifyAuth, verifyTripOwnership, corsHeaders, unauthorizedResponse, forbiddenResponse } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+// Input validation schema
+const RequestSchema = z.object({
+  trip_id: z.string().uuid(),
+  option_id: z.string().optional(),
+  user_message: z.string().min(1).max(2000),
+});
 
 interface EditOperation {
   action: 'replace_item' | 'add_item' | 'remove_item' | 'reorder_items' | 'rewrite_item_text' | 'update_day_pace';
@@ -28,14 +32,39 @@ serve(async (req) => {
   }
 
   try {
-    const { trip_id, option_id, user_message } = await req.json();
+    // 1. Verify authentication
+    const authResult = await verifyAuth(req);
+    if (!authResult.success) {
+      console.log('[copilot-edit] Auth failed:', authResult.error);
+      return unauthorizedResponse(authResult.error, authResult.status);
+    }
     
-    if (!trip_id || !user_message) {
+    const userId = authResult.user.id;
+    console.log('[copilot-edit] Authenticated user:', userId);
+
+    // 2. Parse and validate input
+    const rawBody = await req.json();
+    const parseResult = RequestSchema.safeParse(rawBody);
+    
+    if (!parseResult.success) {
+      console.log('[copilot-edit] Validation failed:', parseResult.error.issues);
       return new Response(
-        JSON.stringify({ error: "trip_id and user_message are required" }),
+        JSON.stringify({ error: "Invalid input", details: parseResult.error.issues }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    
+    const { trip_id, user_message } = parseResult.data;
+
+    // 3. Verify trip ownership
+    const ownershipResult = await verifyTripOwnership(trip_id, userId);
+    if (!ownershipResult.owned) {
+      console.log('[copilot-edit] Ownership check failed:', ownershipResult.error);
+      return forbiddenResponse(ownershipResult.error);
+    }
+    
+    const trip = ownershipResult.trip!;
+    console.log('[copilot-edit] Trip ownership verified for:', trip_id);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -47,21 +76,13 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Get trip details
-    const { data: trip, error: tripError } = await supabase
-      .from("trips")
-      .select("*")
-      .eq("id", trip_id)
-      .single();
-
-    if (tripError || !trip) {
-      throw new Error(`Trip not found: ${tripError?.message}`);
-    }
-
     // Get selected itinerary
     const itineraryId = trip.selected_itinerary_id;
     if (!itineraryId) {
-      throw new Error("No itinerary selected for this trip");
+      return new Response(
+        JSON.stringify({ error: "No itinerary selected for this trip" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const { data: itinerary, error: itinError } = await supabase
@@ -71,7 +92,10 @@ serve(async (req) => {
       .single();
 
     if (itinError || !itinerary) {
-      throw new Error(`Itinerary not found: ${itinError?.message}`);
+      return new Response(
+        JSON.stringify({ error: `Itinerary not found: ${itinError?.message}` }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const days = itinerary.days || [];
@@ -122,15 +146,15 @@ serve(async (req) => {
     const systemPrompt = `You are a travel itinerary copilot. The user has a trip to ${trip.destination} with ${days.length} days.
 
 Current itinerary structure:
-${JSON.stringify(days.map((d: any, idx: number) => ({
+${JSON.stringify(days.map((d: Record<string, unknown>, idx: number) => ({
   day: d.day || idx + 1,
   title: d.title,
-  items: (d.items || []).map((item: any, itemIdx: number) => ({
+  items: ((d.items as Record<string, unknown>[]) || []).map((item: Record<string, unknown>, itemIdx: number) => ({
     index: itemIdx,
     title: item.title,
     time_block: item.time_block,
     location_area: item.location_area,
-    description: item.description?.slice(0, 100),
+    description: String(item.description || '').slice(0, 100),
     cost_min: item.cost_min,
     cost_max: item.cost_max,
   }))
@@ -204,7 +228,7 @@ Item structure:
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
-      console.error("AI API error:", aiResponse.status, errorText);
+      console.error("[copilot-edit] AI API error:", aiResponse.status, errorText);
       if (aiResponse.status === 429) {
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
@@ -217,13 +241,13 @@ Item structure:
     const aiData = await aiResponse.json();
     const responseText = aiData.choices?.[0]?.message?.content || "{}";
     
-    console.log("AI response:", responseText);
+    console.log("[copilot-edit] AI response received");
 
     let editPlan: EditPlan;
     try {
       editPlan = JSON.parse(responseText);
     } catch (e) {
-      console.error("Failed to parse AI response:", e);
+      console.error("[copilot-edit] Failed to parse AI response:", e);
       throw new Error("Failed to parse edit plan from AI");
     }
 
@@ -235,7 +259,7 @@ Item structure:
       const dayIdx = (op.day_number || 1) - 1;
       
       if (dayIdx < 0 || dayIdx >= updatedDays.length) {
-        console.warn(`Invalid day number: ${op.day_number}`);
+        console.warn(`[copilot-edit] Invalid day number: ${op.day_number}`);
         continue;
       }
 
@@ -245,19 +269,34 @@ Item structure:
       switch (op.action) {
         case 'replace_item':
           if (op.item_index !== undefined && op.item_index < items.length && op.new_item) {
+            // Validate new_item fields
+            const newItem = {
+              ...items[op.item_index],
+              title: String(op.new_item.title || items[op.item_index].title).slice(0, 200),
+              description: String(op.new_item.description || '').slice(0, 1000),
+              location_area: String(op.new_item.location_area || '').slice(0, 200),
+              maps_query: String(op.new_item.maps_query || '').slice(0, 300),
+            };
             const oldTitle = items[op.item_index].title;
-            items[op.item_index] = { ...items[op.item_index], ...op.new_item };
-            changes.push(`Replaced "${oldTitle}" with "${op.new_item.title}"`);
+            items[op.item_index] = newItem;
+            changes.push(`Replaced "${oldTitle}" with "${newItem.title}"`);
           }
           break;
 
         case 'add_item':
           if (op.new_item) {
-            items.push({
-              ...op.new_item,
+            const newItem = {
+              title: String(op.new_item.title || 'New Activity').slice(0, 200),
+              description: String(op.new_item.description || '').slice(0, 1000),
               time_block: op.slot || op.new_item.time_block || 'afternoon',
-            });
-            changes.push(`Added "${op.new_item.title}" to Day ${op.day_number}`);
+              location_area: String(op.new_item.location_area || '').slice(0, 200),
+              maps_query: String(op.new_item.maps_query || '').slice(0, 300),
+              duration_minutes: Math.min(1440, Number(op.new_item.duration_minutes) || 60),
+              cost_min: Math.min(10000000, Number(op.new_item.cost_min) || 0),
+              cost_max: Math.min(10000000, Number(op.new_item.cost_max) || 0),
+            };
+            items.push(newItem);
+            changes.push(`Added "${newItem.title}" to Day ${op.day_number}`);
           }
           break;
 
@@ -270,14 +309,21 @@ Item structure:
 
         case 'rewrite_item_text':
           if (op.item_index !== undefined && op.item_index < items.length && op.updates) {
-            items[op.item_index] = { ...items[op.item_index], ...op.updates };
+            const updates: Record<string, unknown> = {};
+            if (op.updates.title) updates.title = String(op.updates.title).slice(0, 200);
+            if (op.updates.description) updates.description = String(op.updates.description).slice(0, 1000);
+            if (op.updates.transit_tip) updates.transit_tip = String(op.updates.transit_tip).slice(0, 500);
+            items[op.item_index] = { ...items[op.item_index], ...updates };
             changes.push(`Updated "${items[op.item_index].title}"`);
           }
           break;
 
         case 'update_day_pace':
           if (op.updates) {
-            updatedDays[dayIdx] = { ...day, ...op.updates };
+            const updates: Record<string, unknown> = {};
+            if (op.updates.notes) updates.notes = String(op.updates.notes).slice(0, 500);
+            if (op.updates.title) updates.title = String(op.updates.title).slice(0, 200);
+            updatedDays[dayIdx] = { ...day, ...updates };
             changes.push(`Updated Day ${op.day_number} summary`);
           }
           break;
@@ -294,7 +340,7 @@ Item structure:
         .eq("id", itineraryId);
 
       if (updateError) {
-        console.error("Failed to update itinerary:", updateError);
+        console.error("[copilot-edit] Failed to update itinerary:", updateError);
         throw new Error("Failed to apply changes");
       }
 
@@ -330,7 +376,7 @@ Item structure:
     );
 
   } catch (error) {
-    console.error("Copilot error:", error);
+    console.error("[copilot-edit] Error:", error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
