@@ -966,6 +966,26 @@ ${notes ? `- Additional notes: ${notes}` : ''}`;
 
     console.log(`[generate-itinerary] Successfully generated ${savedItineraries.length} itineraries`);
 
+    // Auto-verify places if enabled in trip settings
+    const { data: tripSettings } = await supabase
+      .from('trip_settings')
+      .select('auto_verify')
+      .eq('trip_id', tripId)
+      .single();
+
+    if (tripSettings?.auto_verify) {
+      console.log('[generate-itinerary] Auto-verify enabled, triggering place verification...');
+      // Trigger verification in background (don't await to avoid blocking response)
+      fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/verify-trip-places`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': req.headers.get('Authorization') || '',
+        },
+        body: JSON.stringify({ tripId }),
+      }).catch(err => console.error('[generate-itinerary] Auto-verify trigger failed:', err));
+    }
+
     return new Response(JSON.stringify({ 
       success: true,
       itineraries: savedItineraries.map(it => ({

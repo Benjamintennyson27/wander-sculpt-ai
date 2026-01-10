@@ -184,6 +184,15 @@ export default function NewTrip() {
 
       if (error) throw error;
 
+      // Create trip settings with auto_verify enabled by default
+      await supabase
+        .from('trip_settings')
+        .insert({
+          trip_id: trip.id,
+          auto_verify: true,
+          verify_mode: 'basic'
+        });
+
       // Trigger itinerary generation
       const { data: genData, error: genError } = await supabase.functions.invoke('generate-itinerary', {
         body: { tripId: trip.id }
