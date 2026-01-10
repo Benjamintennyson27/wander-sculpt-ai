@@ -1,7 +1,10 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { verifyAuth, verifyTripOwnership, corsHeaders, unauthorizedResponse, forbiddenResponse } from "../_shared/auth.ts";
+import { getServiceClient } from "../_shared/supabase-client.ts";
+import { callAI, parseAIJson, getAIErrorStatus } from "../_shared/ai-client.ts";
+import { handleCors, jsonResponse, errorResponse, badRequest } from "../_shared/response.ts";
+import { validateBody, sanitizeString, sanitizeNumber, sanitizeBoolean } from "../_shared/validation.ts";
 
 // Input validation schema
 const RequestSchema = z.object({
@@ -26,9 +29,8 @@ interface Alternative {
 }
 
 serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
 
   try {
     // 1. Verify authentication
@@ -39,49 +41,26 @@ serve(async (req) => {
     }
     
     const userId = authResult.user.id;
-    console.log('[activity-alternatives] Authenticated user:', userId);
 
-    // 2. Parse and validate input
-    const rawBody = await req.json();
-    const parseResult = RequestSchema.safeParse(rawBody);
+    // 2. Validate input
+    const { data: input, error: validationError } = await validateBody(req, RequestSchema);
+    if (validationError) return validationError;
     
-    if (!parseResult.success) {
-      console.log('[activity-alternatives] Validation failed:', parseResult.error.issues);
-      return new Response(
-        JSON.stringify({ error: "Invalid input", details: parseResult.error.issues }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    
-    const { trip_id, itinerary_id, item_index, day_number } = parseResult.data;
+    const { trip_id, itinerary_id, item_index, day_number } = input;
 
     // 3. Verify trip ownership
     const ownershipResult = await verifyTripOwnership(trip_id, userId);
     if (!ownershipResult.owned) {
-      console.log('[activity-alternatives] Ownership check failed:', ownershipResult.error);
       return forbiddenResponse(ownershipResult.error);
     }
     
     const trip = ownershipResult.trip!;
-    console.log('[activity-alternatives] Trip ownership verified for:', trip_id);
+    const supabase = getServiceClient();
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
-    
-    if (!lovableApiKey) {
-      throw new Error("LOVABLE_API_KEY is not configured");
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    // Get itinerary - use provided itinerary_id or fall back to selected_itinerary_id
+    // Get itinerary
     const targetItineraryId = itinerary_id || trip.selected_itinerary_id;
     if (!targetItineraryId) {
-      return new Response(
-        JSON.stringify({ error: "No itinerary specified. Please select an itinerary option first." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return badRequest("No itinerary specified. Please select an itinerary option first.");
     }
 
     const { data: itinerary, error: itinError } = await supabase
@@ -91,35 +70,26 @@ serve(async (req) => {
       .single();
 
     if (itinError || !itinerary) {
-      return new Response(
-        JSON.stringify({ error: `Itinerary not found: ${itinError?.message}` }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return errorResponse(`Itinerary not found: ${itinError?.message}`, 404);
     }
 
     const days = itinerary.days || [];
     const dayIdx = day_number - 1;
     
     if (dayIdx < 0 || dayIdx >= days.length) {
-      return new Response(
-        JSON.stringify({ error: `Invalid day number: ${day_number}` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return badRequest(`Invalid day number: ${day_number}`);
     }
 
     const currentItem = days[dayIdx]?.items?.[item_index];
     if (!currentItem) {
-      return new Response(
-        JSON.stringify({ error: `Item not found at day ${day_number}, index ${item_index}` }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return errorResponse(`Item not found at day ${day_number}, index ${item_index}`, 404);
     }
 
-    // Detect category from current item
+    // Detect category
     const isFood = currentItem.food_related || /restaurant|cafe|food|eat|dine|breakfast|lunch|dinner/i.test(currentItem.title);
     const category = isFood ? 'food' : 'attraction';
 
-    // Build prompt for AI
+    // Build AI prompt
     const systemPrompt = `You are a travel expert for ${trip.destination}. Generate 5 alternative activities to replace the current one.
 
 Current activity being replaced:
@@ -149,7 +119,7 @@ Return a JSON object with this structure:
   "alternatives": [
     {
       "title": "Place/Activity Name",
-      "area": "Neighborhood/Area in ${trip.destination}",
+      "area": "Neighborhood/Area",
       "description": "Brief 1-2 sentence description",
       "estimated_cost_min": 100,
       "estimated_cost_max": 500,
@@ -157,87 +127,52 @@ Return a JSON object with this structure:
       "category": "${category}",
       "location_text": "Specific address or landmark",
       "maps_query": "Search query for Google Maps",
-      "kid_friendly": true/false,
+      "kid_friendly": true,
       "food_related": ${isFood}
     }
   ]
 }`;
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `Generate 5 alternative ${category}s to replace "${currentItem.title}" in ${trip.destination}. Make them diverse but all appropriate for ${currentItem.time_block}.` }
-        ],
-        response_format: { type: "json_object" },
-      }),
+    // Call AI
+    const aiResponse = await callAI({
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Generate 5 alternative ${category}s to replace "${currentItem.title}" in ${trip.destination}. Make them diverse but all appropriate for ${currentItem.time_block}.` }
+      ],
+      jsonResponse: true,
     });
 
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error("[activity-alternatives] AI API error:", aiResponse.status, errorText);
-      if (aiResponse.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      throw new Error(`AI API error: ${aiResponse.status}`);
-    }
-
-    const aiData = await aiResponse.json();
-    const responseText = aiData.choices?.[0]?.message?.content || "{}";
-    
-    console.log("[activity-alternatives] AI response received");
-
-    let result: { alternatives: Alternative[] };
-    try {
-      result = JSON.parse(responseText);
-    } catch (e) {
-      console.error("[activity-alternatives] Failed to parse AI response:", e);
-      throw new Error("Failed to generate alternatives");
-    }
+    const result = parseAIJson<{ alternatives: Alternative[] }>(aiResponse.content, { alternatives: [] });
 
     // Validate and clean alternatives
     const alternatives = (result.alternatives || []).slice(0, 5).map(alt => ({
-      title: String(alt.title || 'Unknown').slice(0, 200),
-      area: String(alt.area || trip.destination).slice(0, 200),
-      description: String(alt.description || '').slice(0, 1000),
-      estimated_cost_min: Math.max(0, Math.min(10000000, Number(alt.estimated_cost_min) || 0)),
-      estimated_cost_max: Math.max(Number(alt.estimated_cost_min) || 0, Math.min(10000000, Number(alt.estimated_cost_max) || 0)),
-      duration_minutes: Math.max(0, Math.min(1440, Number(alt.duration_minutes) || 60)),
-      category: String(alt.category || category).slice(0, 50),
-      location_text: String(alt.location_text || alt.area || '').slice(0, 200),
-      maps_query: String(alt.maps_query || `${alt.title} ${trip.destination}`).slice(0, 300),
-      kid_friendly: Boolean(alt.kid_friendly),
-      food_related: Boolean(alt.food_related),
+      title: sanitizeString(alt.title, 200, 'Unknown'),
+      area: sanitizeString(alt.area, 200, trip.destination as string),
+      description: sanitizeString(alt.description, 1000),
+      estimated_cost_min: sanitizeNumber(alt.estimated_cost_min, 0, 10000000),
+      estimated_cost_max: Math.max(sanitizeNumber(alt.estimated_cost_min, 0), sanitizeNumber(alt.estimated_cost_max, 0, 10000000)),
+      duration_minutes: sanitizeNumber(alt.duration_minutes, 0, 1440, 60),
+      category: sanitizeString(alt.category, 50, category),
+      location_text: sanitizeString(alt.location_text || alt.area, 200),
+      maps_query: sanitizeString(alt.maps_query, 300, `${alt.title} ${trip.destination}`),
+      kid_friendly: sanitizeBoolean(alt.kid_friendly),
+      food_related: sanitizeBoolean(alt.food_related),
     }));
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        current_item: {
-          title: currentItem.title,
-          time_block: currentItem.time_block,
-          day_number,
-          item_index,
-        },
-        alternatives,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return jsonResponse({
+      success: true,
+      current_item: {
+        title: currentItem.title,
+        time_block: currentItem.time_block,
+        day_number,
+        item_index,
+      },
+      alternatives,
+    });
 
   } catch (error) {
     console.error("[activity-alternatives] Error:", error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    const status = getAIErrorStatus(error);
+    return errorResponse(error instanceof Error ? error.message : "Unknown error", status);
   }
 });
