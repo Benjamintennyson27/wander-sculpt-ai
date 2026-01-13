@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Cloud, Sun, CloudRain, Snowflake, Wind, Loader2, ThermometerSun, Droplets } from 'lucide-react';
+import { Cloud, Sun, CloudRain, Snowflake, Wind, Loader2, ThermometerSun, Droplets, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { format, addDays, differenceInDays } from 'date-fns';
+import { format, differenceInDays } from 'date-fns';
+import { supabase } from '@/integrations/supabase/client';
 
 interface WeatherDay {
   date: string;
@@ -10,6 +11,7 @@ interface WeatherDay {
   condition: 'sunny' | 'cloudy' | 'rainy' | 'snowy' | 'windy' | 'partly-cloudy';
   humidity: number;
   description: string;
+  icon?: string;
 }
 
 interface WeatherForecastProps {
@@ -17,68 +19,6 @@ interface WeatherForecastProps {
   startDate: string;
   endDate: string;
   className?: string;
-}
-
-// Mock weather data generator based on destination
-function generateMockWeather(destination: string, startDate: string, endDate: string): WeatherDay[] {
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  const days = differenceInDays(end, start) + 1;
-  const limitedDays = Math.min(days, 7); // Show max 7 days
-  
-  // Determine climate based on destination keywords
-  const destLower = destination.toLowerCase();
-  let baseTemp = 25;
-  let tempVariance = 5;
-  let rainChance = 0.2;
-  
-  if (destLower.includes('goa') || destLower.includes('kerala') || destLower.includes('mumbai')) {
-    baseTemp = 30;
-    rainChance = 0.4;
-  } else if (destLower.includes('shimla') || destLower.includes('manali') || destLower.includes('ladakh')) {
-    baseTemp = 15;
-    rainChance = 0.3;
-  } else if (destLower.includes('rajasthan') || destLower.includes('jaipur') || destLower.includes('jodhpur')) {
-    baseTemp = 35;
-    rainChance = 0.1;
-  } else if (destLower.includes('darjeeling') || destLower.includes('sikkim') || destLower.includes('northeast')) {
-    baseTemp = 18;
-    rainChance = 0.5;
-  }
-  
-  const conditions: WeatherDay['condition'][] = ['sunny', 'cloudy', 'rainy', 'partly-cloudy'];
-  
-  return Array.from({ length: limitedDays }, (_, i) => {
-    const date = addDays(start, i);
-    const randomCondition = Math.random() < rainChance ? 'rainy' : 
-                           Math.random() < 0.3 ? 'cloudy' : 
-                           Math.random() < 0.5 ? 'partly-cloudy' : 'sunny';
-    
-    const tempOffset = Math.floor(Math.random() * tempVariance * 2) - tempVariance;
-    const high = baseTemp + tempOffset + Math.floor(Math.random() * 3);
-    const low = high - 8 - Math.floor(Math.random() * 4);
-    
-    return {
-      date: format(date, 'yyyy-MM-dd'),
-      temp_high: high,
-      temp_low: low,
-      condition: randomCondition,
-      humidity: 40 + Math.floor(Math.random() * 40),
-      description: getDescription(randomCondition, high),
-    };
-  });
-}
-
-function getDescription(condition: WeatherDay['condition'], temp: number): string {
-  switch (condition) {
-    case 'sunny': return temp > 30 ? 'Hot and sunny' : 'Clear skies';
-    case 'cloudy': return 'Overcast';
-    case 'rainy': return 'Rain expected';
-    case 'partly-cloudy': return 'Partly cloudy';
-    case 'snowy': return 'Snow likely';
-    case 'windy': return 'Windy conditions';
-    default: return 'Mixed conditions';
-  }
 }
 
 function getWeatherIcon(condition: WeatherDay['condition']) {
@@ -108,17 +48,54 @@ function getConditionColor(condition: WeatherDay['condition']) {
 export function WeatherForecast({ destination, startDate, endDate, className }: WeatherForecastProps) {
   const [weather, setWeather] = useState<WeatherDay[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [locationName, setLocationName] = useState<string>('');
   
   useEffect(() => {
-    // Simulate API call with mock data
-    setLoading(true);
-    const timer = setTimeout(() => {
-      const mockData = generateMockWeather(destination, startDate, endDate);
-      setWeather(mockData);
-      setLoading(false);
-    }, 500);
+    async function fetchWeather() {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const tripDays = differenceInDays(end, start) + 1;
+        const daysToFetch = Math.min(tripDays, 5); // OpenWeather free tier is 5-day forecast
+        
+        const { data, error: fnError } = await supabase.functions.invoke('get-weather', {
+          body: { 
+            destination,
+            days: daysToFetch 
+          }
+        });
+        
+        if (fnError) {
+          console.error('Weather fetch error:', fnError);
+          setError('Unable to fetch weather data');
+          return;
+        }
+        
+        if (data?.error) {
+          console.error('Weather API error:', data.error);
+          setError(data.error);
+          return;
+        }
+        
+        if (data?.weather && data.weather.length > 0) {
+          setWeather(data.weather);
+          setLocationName(data.location?.name || destination);
+        } else {
+          setError('No weather data available');
+        }
+      } catch (err) {
+        console.error('Error fetching weather:', err);
+        setError('Failed to load weather');
+      } finally {
+        setLoading(false);
+      }
+    }
     
-    return () => clearTimeout(timer);
+    fetchWeather();
   }, [destination, startDate, endDate]);
   
   if (loading) {
@@ -126,6 +103,22 @@ export function WeatherForecast({ destination, startDate, endDate, className }: 
       <div className={cn('glass-card p-5', className)}>
         <div className="flex items-center justify-center py-8">
           <Loader2 className="w-6 h-6 animate-spin text-primary" />
+          <span className="ml-2 text-sm text-muted-foreground">Loading weather...</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (error || weather.length === 0) {
+    return (
+      <div className={cn('glass-card p-5', className)}>
+        <h3 className="font-medium mb-4 flex items-center gap-2">
+          <ThermometerSun className="w-4 h-4 text-primary" />
+          Weather Forecast
+        </h3>
+        <div className="flex items-center gap-2 text-muted-foreground py-4">
+          <AlertCircle className="w-4 h-4" />
+          <span className="text-sm">{error || 'Weather data unavailable'}</span>
         </div>
       </div>
     );
@@ -133,15 +126,19 @@ export function WeatherForecast({ destination, startDate, endDate, className }: 
   
   return (
     <div className={cn('glass-card p-5', className)}>
-      <h3 className="font-medium mb-4 flex items-center gap-2">
+      <h3 className="font-medium mb-1 flex items-center gap-2">
         <ThermometerSun className="w-4 h-4 text-primary" />
         Weather Forecast
       </h3>
+      {locationName && (
+        <p className="text-xs text-muted-foreground mb-4">{locationName}</p>
+      )}
       
-      <div className="grid grid-cols-7 gap-2">
+      <div className="grid grid-cols-5 gap-2">
         {weather.map((day, idx) => {
           const Icon = getWeatherIcon(day.condition);
           const colorClass = getConditionColor(day.condition);
+          const dayDate = new Date(day.date);
           
           return (
             <div
@@ -152,11 +149,17 @@ export function WeatherForecast({ destination, startDate, endDate, className }: 
               )}
             >
               <div className="text-xs text-muted-foreground mb-1">
-                {idx === 0 ? 'Day 1' : `Day ${idx + 1}`}
+                {format(dayDate, 'EEE')}
+              </div>
+              <div className="text-[10px] text-muted-foreground/70 mb-1">
+                {format(dayDate, 'd MMM')}
               </div>
               <Icon className={cn('w-5 h-5 mx-auto mb-1', colorClass)} />
               <div className="text-sm font-medium">{day.temp_high}°</div>
               <div className="text-xs text-muted-foreground">{day.temp_low}°</div>
+              <div className="text-[10px] text-muted-foreground/70 mt-1 truncate" title={day.description}>
+                {day.description}
+              </div>
             </div>
           );
         })}
@@ -169,7 +172,7 @@ export function WeatherForecast({ destination, startDate, endDate, className }: 
             <span>Avg. Humidity: {Math.round(weather.reduce((acc, d) => acc + d.humidity, 0) / weather.length)}%</span>
           </div>
           <span className="text-xs text-muted-foreground italic">
-            *Forecast may vary
+            Powered by OpenWeather
           </span>
         </div>
       </div>
