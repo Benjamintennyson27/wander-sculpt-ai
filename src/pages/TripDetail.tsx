@@ -11,7 +11,7 @@ import {
   Calendar, Clock, Utensils, Lightbulb, AlertTriangle,
   Loader2, ChevronDown, ChevronUp, Users, IndianRupee,
   Share2, Copy, Link as LinkIcon, Wallet, Map as MapIcon, X, BadgeCheck,
-  Sparkles
+  Sparkles, Briefcase, ThermometerSun
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { 
@@ -23,6 +23,9 @@ import { TimelineDay } from '@/components/trip/TimelineDay';
 import { TripMap } from '@/components/trip/TripMap';
 import { CopilotDrawer } from '@/components/trip/CopilotDrawer';
 import { ReplaceActivityModal } from '@/components/trip/ReplaceActivityModal';
+import { ExportCalendar } from '@/components/trip/ExportCalendar';
+import { WeatherForecast } from '@/components/trip/WeatherForecast';
+import { PackingList } from '@/components/trip/PackingList';
 import { cn } from '@/lib/utils';
 
 export default function TripDetail() {
@@ -551,6 +554,9 @@ export default function TripDetail() {
                 <Copy className="w-4 h-4 mr-2" />
                 Copy as Text
               </Button>
+              {currentItinerary && (
+                <ExportCalendar trip={trip} itinerary={currentItinerary} />
+              )}
             </div>
 
             {/* Main Content Tabs */}
@@ -636,6 +642,22 @@ export default function TripDetail() {
                           />
                         </div>
                       </div>
+                    </div>
+
+                    {/* Weather & Packing Section */}
+                    <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <WeatherForecast
+                        destination={trip.destination}
+                        startDate={trip.start_date}
+                        endDate={trip.end_date}
+                      />
+                      <PackingList
+                        destination={trip.destination}
+                        startDate={trip.start_date}
+                        endDate={trip.end_date}
+                        isFamily={trip.is_family || false}
+                        tripId={trip.id}
+                      />
                     </div>
 
                     {/* Tips & Disclaimers */}

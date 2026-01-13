@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { UsageBadge } from '@/components/UsageBadge';
+import { TripCountdown } from '@/components/trip/TripCountdown';
 import { 
   Plane, Plus, MapPin, Calendar, Users, 
   ChevronRight, LogOut, Settings
@@ -172,9 +173,13 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${getStatusColor(trip.status)}`}>
-                        {trip.status}
-                      </span>
+                      {trip.status === 'completed' ? (
+                        <TripCountdown startDate={trip.start_date} endDate={trip.end_date} />
+                      ) : (
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-medium capitalize ${getStatusColor(trip.status)}`}>
+                          {trip.status}
+                        </span>
+                      )}
                       <ChevronRight className="w-5 h-5 text-muted-foreground" />
                     </div>
                   </div>
