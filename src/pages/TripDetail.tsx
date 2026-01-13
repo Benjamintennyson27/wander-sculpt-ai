@@ -628,18 +628,20 @@ export default function TripDetail() {
 
                       {/* Map Section - Desktop */}
                       <div className="hidden lg:block lg:col-span-2">
-                        <div className="sticky top-24">
-                          <h3 className="text-lg font-display font-semibold flex items-center gap-2 mb-4">
+                        <div className="sticky top-24 space-y-4">
+                          <h3 className="text-lg font-display font-semibold flex items-center gap-2">
                             <MapIcon className="w-5 h-5 text-primary" />
                             Day {selectedDay?.day || 1} Map
                           </h3>
-                          <TripMap
-                            day={selectedDay}
-                            selectedActivityIndex={selectedActivityIndex}
-                            onPinClick={handlePinClick}
-                            destination={trip.destination}
-                            className="h-[500px]"
-                          />
+                          <div className="aspect-[4/3] min-h-[400px] max-h-[600px]">
+                            <TripMap
+                              day={selectedDay}
+                              selectedActivityIndex={selectedActivityIndex}
+                              onPinClick={handlePinClick}
+                              destination={trip.destination}
+                              className="h-full w-full"
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -849,41 +851,49 @@ export default function TripDetail() {
         )}
       </main>
 
-      {/* Mobile Map Bottom Sheet */}
+      {/* Mobile Map Overlay */}
       {showMobileMap && (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-[100] lg:hidden">
           {/* Backdrop */}
           <div 
-            className="absolute inset-0 bg-background/80 backdrop-blur-sm"
+            className="absolute inset-0 bg-background/90 backdrop-blur-md"
             onClick={() => setShowMobileMap(false)}
           />
           
           {/* Sheet */}
-          <div className="absolute bottom-0 left-0 right-0 bg-card border-t border-border rounded-t-2xl animate-slide-up">
-            <div className="p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-display font-semibold">
+          <div className="absolute bottom-0 left-0 right-0 bg-card border-t border-border rounded-t-2xl animate-slide-up shadow-2xl max-h-[85vh] flex flex-col">
+            {/* Handle bar */}
+            <div className="flex justify-center pt-3 pb-1">
+              <div className="w-12 h-1.5 rounded-full bg-muted-foreground/30" />
+            </div>
+            
+            <div className="px-4 pb-4 flex flex-col flex-1 overflow-hidden">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-display font-semibold text-lg">
                   Day {selectedDay?.day || 1} Map
                 </h3>
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="h-8 w-8"
                   onClick={() => setShowMobileMap(false)}
                 >
                   <X className="w-5 h-5" />
                 </Button>
               </div>
               
-              <TripMap
-                day={selectedDay}
-                selectedActivityIndex={selectedActivityIndex}
-                onPinClick={(idx) => {
-                  handlePinClick(idx);
-                  setShowMobileMap(false);
-                }}
-                destination={trip.destination}
-                className="h-[400px]"
-              />
+              <div className="flex-1 min-h-0">
+                <TripMap
+                  day={selectedDay}
+                  selectedActivityIndex={selectedActivityIndex}
+                  onPinClick={(idx) => {
+                    handlePinClick(idx);
+                    setShowMobileMap(false);
+                  }}
+                  destination={trip.destination}
+                  className="h-full min-h-[350px] max-h-[60vh]"
+                />
+              </div>
             </div>
           </div>
         </div>
