@@ -21,9 +21,10 @@ const timeBlockPinColors = {
   night: '#2563eb',      // blue-600 (accent)
 };
 
-const mapContainerStyle = {
+const mapContainerStyle: React.CSSProperties = {
   width: '100%',
   height: '100%',
+  minHeight: '300px',
 };
 
 const darkMapStyle = [
@@ -333,36 +334,40 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
         ref={ref}
         className={cn(
           'relative rounded-xl overflow-hidden',
-          'bg-card/70 backdrop-blur-sm border border-border/50',
+          'bg-card border border-border',
+          'min-h-[300px]',
           className
         )}
+        style={{ isolation: 'isolate' }}
       >
-        <GoogleMapContent
-          apiKey={apiKey}
-          day={day}
-          selectedActivityIndex={selectedActivityIndex}
-          onPinClick={onPinClick}
-          destination={destination}
-        />
+        <div className="absolute inset-0">
+          <GoogleMapContent
+            apiKey={apiKey}
+            day={day}
+            selectedActivityIndex={selectedActivityIndex}
+            onPinClick={onPinClick}
+            destination={destination}
+          />
+        </div>
 
         {/* Day label */}
-        <div className="absolute top-3 left-3 flex items-center gap-2 px-2.5 py-1 rounded-md bg-card/90 backdrop-blur-sm border border-border/50 z-10">
+        <div className="absolute top-3 left-3 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-card/95 backdrop-blur-md border border-border shadow-lg z-20">
           <Navigation className="w-3.5 h-3.5 text-primary" />
           <span className="text-xs font-medium">Day {day.day}</span>
         </div>
 
         {/* Legend */}
-        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap justify-center gap-2 z-10">
+        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap justify-center gap-1.5 z-20">
           {Object.entries(timeBlockPinColors).map(([block, color]) => (
             <div 
               key={block}
-              className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-card/80 backdrop-blur-sm"
+              className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-card/95 backdrop-blur-md border border-border shadow-sm"
             >
               <div 
-                className="w-2.5 h-2.5 rounded-full"
+                className="w-2.5 h-2.5 rounded-full shadow-sm"
                 style={{ backgroundColor: color }}
               />
-              <span className="text-[10px] text-muted-foreground capitalize">{block}</span>
+              <span className="text-[10px] font-medium text-foreground/80 capitalize">{block}</span>
             </div>
           ))}
         </div>
