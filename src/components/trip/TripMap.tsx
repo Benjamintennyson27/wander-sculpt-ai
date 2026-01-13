@@ -1,9 +1,11 @@
-import { useState, useEffect, forwardRef, useCallback } from 'react';
-import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
-import { supabase } from '@/integrations/supabase/client';
+import { useState, useEffect, forwardRef, useMemo } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { ItineraryDay, ItineraryItem } from '@/lib/itinerary-adapter';
 import { cn } from '@/lib/utils';
 import { MapPin, Navigation, ExternalLink, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface TripMapProps {
   day: ItineraryDay | null;
@@ -21,168 +23,181 @@ const timeBlockPinColors = {
   night: '#2563eb',      // blue-600 (accent)
 };
 
-const mapContainerStyle: React.CSSProperties = {
-  width: '100%',
-  height: '100%',
-  minHeight: '300px',
+// Create custom marker icon
+const createMarkerIcon = (color: string, label: string, isSelected: boolean) => {
+  const size = isSelected ? 36 : 28;
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+      <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="${color}" stroke="white" stroke-width="2"/>
+      <text x="${size/2}" y="${size/2 + 4}" text-anchor="middle" fill="white" font-size="${isSelected ? 14 : 11}" font-weight="bold" font-family="Arial">${label}</text>
+    </svg>
+  `;
+  return L.divIcon({
+    html: svg,
+    className: 'custom-marker',
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
 };
 
-const darkMapStyle = [
-  { elementType: 'geometry', stylers: [{ color: '#1a1a2e' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#1a1a2e' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#8b8b9a' }] },
-  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#3a3a4e' }] },
-  { featureType: 'poi', elementType: 'geometry', stylers: [{ color: '#242438' }] },
-  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#6b6b7a' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2a2a3e' }] },
-  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#8a8a9a' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#3a3a4e' }] },
-  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#242438' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0e1626' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#4a5568' }] },
-];
+interface GeocodedLocation {
+  lat: number;
+  lng: number;
+}
 
-// Inner component that uses the Google Maps hook - only rendered when API key is ready
-function GoogleMapContent({
-  apiKey,
+interface Activity {
+  item: ItineraryItem & { maps_query?: string };
+  index: number;
+  block: string;
+}
+
+// Component to fit bounds when locations change
+function FitBounds({ locations }: { locations: Map<number, GeocodedLocation> }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (locations.size === 0) return;
+
+    const bounds = L.latLngBounds(
+      Array.from(locations.values()).map(loc => [loc.lat, loc.lng] as [number, number])
+    );
+    
+    map.fitBounds(bounds, { padding: [50, 50] });
+  }, [map, locations]);
+
+  return null;
+}
+
+function LeafletMapContent({
   day,
   selectedActivityIndex,
   onPinClick,
   destination,
 }: {
-  apiKey: string;
   day: ItineraryDay;
   selectedActivityIndex: number | null;
   onPinClick: (activityIndex: number) => void;
   destination?: string;
 }) {
-  const [selectedMarker, setSelectedMarker] = useState<number | null>(null);
-  const [map, setMap] = useState<google.maps.Map | null>(null);
-  const [geocodedLocations, setGeocodedLocations] = useState<Map<number, { lat: number; lng: number }>>(new Map());
-
-  const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: apiKey,
-    id: 'google-map-script',
-  });
+  const [geocodedLocations, setGeocodedLocations] = useState<Map<number, GeocodedLocation>>(new Map());
+  const [loading, setLoading] = useState(true);
 
   // Flatten activities with their indices
-  const activities: { item: ItineraryItem & { maps_query?: string }; index: number; block: string }[] = [];
-  const timeBlocks = ['morning', 'afternoon', 'evening', 'night'];
-  let globalIndex = 0;
-  
-  timeBlocks.forEach(block => {
-    day.items
-      .filter(item => item.time_block === block)
-      .forEach(item => {
-        activities.push({ item, index: globalIndex, block });
-        globalIndex++;
-      });
-  });
-
-  // Geocode locations when activities or map changes
-  useEffect(() => {
-    if (!isLoaded || !map || activities.length === 0) return;
-
-    const geocoder = new google.maps.Geocoder();
-    const newLocations = new Map<number, { lat: number; lng: number }>();
-    let completed = 0;
-
-    activities.forEach((activity) => {
-      // Check if we have verified lat/lng
-      const verifiedFacts = activity.item.verified_facts;
-      if (verifiedFacts?.lat && verifiedFacts?.lng) {
-        newLocations.set(activity.index, { lat: verifiedFacts.lat, lng: verifiedFacts.lng });
-        completed++;
-        if (completed === activities.length) {
-          setGeocodedLocations(new Map(newLocations));
-        }
-        return;
-      }
-
-      // Otherwise geocode
-      const query = activity.item.maps_query || 
-        `${activity.item.title}, ${activity.item.location_area || ''}, ${destination || ''}`;
-      
-      geocoder.geocode({ address: query }, (results, status) => {
-        if (status === 'OK' && results && results[0]) {
-          const location = results[0].geometry.location;
-          newLocations.set(activity.index, { lat: location.lat(), lng: location.lng() });
-        }
-        completed++;
-        if (completed === activities.length) {
-          setGeocodedLocations(new Map(newLocations));
-        }
-      });
-    });
-  }, [isLoaded, map, day, destination]);
-
-  // Fit bounds when locations change
-  useEffect(() => {
-    if (!map || geocodedLocations.size === 0) return;
-
-    const bounds = new google.maps.LatLngBounds();
-    geocodedLocations.forEach((loc) => {
-      bounds.extend(new google.maps.LatLng(loc.lat, loc.lng));
+  const activities = useMemo(() => {
+    const result: Activity[] = [];
+    const timeBlocks = ['morning', 'afternoon', 'evening', 'night'];
+    let globalIndex = 0;
+    
+    timeBlocks.forEach(block => {
+      day.items
+        .filter(item => item.time_block === block)
+        .forEach(item => {
+          result.push({ item, index: globalIndex, block });
+          globalIndex++;
+        });
     });
     
-    map.fitBounds(bounds, { top: 50, bottom: 80, left: 20, right: 20 });
-  }, [map, geocodedLocations]);
+    return result;
+  }, [day]);
 
-  const onLoad = useCallback((map: google.maps.Map) => {
-    setMap(map);
-  }, []);
+  // Geocode locations using Nominatim (free, no API key)
+  useEffect(() => {
+    if (activities.length === 0) {
+      setLoading(false);
+      return;
+    }
 
-  const onUnmount = useCallback(() => {
-    setMap(null);
-  }, []);
+    const geocodeLocations = async () => {
+      const newLocations = new Map<number, GeocodedLocation>();
 
-  // Create custom marker icon
-  const createMarkerIcon = (color: string, label: string, isSelected: boolean) => {
-    const size = isSelected ? 36 : 28;
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-        <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="${color}" stroke="white" stroke-width="2"/>
-        <text x="${size/2}" y="${size/2 + 4}" text-anchor="middle" fill="white" font-size="${isSelected ? 14 : 11}" font-weight="bold" font-family="Arial">${label}</text>
-      </svg>
-    `;
-    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
-  };
+      for (const activity of activities) {
+        // Check if we have verified lat/lng from database
+        const verifiedFacts = activity.item.verified_facts;
+        if (verifiedFacts?.lat && verifiedFacts?.lng) {
+          newLocations.set(activity.index, { lat: verifiedFacts.lat, lng: verifiedFacts.lng });
+          continue;
+        }
 
-  if (loadError) {
+        // Try to geocode using Nominatim
+        const query = activity.item.maps_query || 
+          `${activity.item.title}, ${activity.item.location_area || ''}, ${destination || ''}`;
+        
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`,
+            { headers: { 'User-Agent': 'TripPlanner/1.0' } }
+          );
+          const data = await response.json();
+          
+          if (data && data.length > 0) {
+            newLocations.set(activity.index, {
+              lat: parseFloat(data[0].lat),
+              lng: parseFloat(data[0].lon),
+            });
+          }
+        } catch (e) {
+          console.error('Geocoding error:', e);
+        }
+
+        // Small delay to respect Nominatim rate limits
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      setGeocodedLocations(newLocations);
+      setLoading(false);
+    };
+
+    geocodeLocations();
+  }, [activities, destination]);
+
+  // Calculate center from locations or use default
+  const center = useMemo(() => {
+    if (geocodedLocations.size > 0) {
+      const locs = Array.from(geocodedLocations.values());
+      const avgLat = locs.reduce((sum, loc) => sum + loc.lat, 0) / locs.length;
+      const avgLng = locs.reduce((sum, loc) => sum + loc.lng, 0) / locs.length;
+      return [avgLat, avgLng] as [number, number];
+    }
+    return [20.5937, 78.9629] as [number, number]; // Default to India center
+  }, [geocodedLocations]);
+
+  if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center p-8">
-          <MapPin className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Map failed to load</p>
+      <div className="flex items-center justify-center h-full bg-card">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">Loading locations...</p>
         </div>
       </div>
     );
   }
 
-  if (!isLoaded) {
+  if (geocodedLocations.size === 0) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="flex items-center justify-center h-full bg-card">
+        <div className="text-center p-8">
+          <MapPin className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">No locations found</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <GoogleMap
-      mapContainerStyle={mapContainerStyle}
-      center={{ lat: 20.5937, lng: 78.9629 }}
-      zoom={5}
-      onLoad={onLoad}
-      onUnmount={onUnmount}
-      options={{
-        styles: darkMapStyle,
-        disableDefaultUI: true,
-        zoomControl: true,
-        mapTypeControl: false,
-        streetViewControl: false,
-        fullscreenControl: false,
-      }}
+    <MapContainer
+      center={center}
+      zoom={12}
+      style={{ width: '100%', height: '100%', minHeight: '300px' }}
+      zoomControl={true}
+      scrollWheelZoom={true}
     >
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+      />
+      
+      <FitBounds locations={geocodedLocations} />
+
       {activities.map((activity, idx) => {
         const location = geocodedLocations.get(activity.index);
         if (!location) return null;
@@ -193,120 +208,39 @@ function GoogleMapContent({
         return (
           <Marker
             key={activity.index}
-            position={location}
-            icon={{
-              url: createMarkerIcon(color, String(idx + 1), isSelected),
-              scaledSize: new google.maps.Size(isSelected ? 36 : 28, isSelected ? 36 : 28),
-              anchor: new google.maps.Point(isSelected ? 18 : 14, isSelected ? 18 : 14),
+            position={[location.lat, location.lng]}
+            icon={createMarkerIcon(color, String(idx + 1), isSelected)}
+            eventHandlers={{
+              click: () => onPinClick(activity.index),
             }}
-            zIndex={isSelected ? 100 : 1}
-            onClick={() => {
-              onPinClick(activity.index);
-              setSelectedMarker(activity.index);
-            }}
-          />
+          >
+            <Popup>
+              <div className="p-1 max-w-[200px]">
+                <p className="font-medium text-sm text-gray-900">{activity.item.title}</p>
+                {activity.item.location_area && (
+                  <p className="text-xs text-gray-600 mt-0.5">{activity.item.location_area}</p>
+                )}
+                {activity.item.maps_query && (
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activity.item.maps_query)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-blue-600 hover:underline mt-1 inline-flex items-center gap-1"
+                  >
+                    Open in Google Maps <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+            </Popup>
+          </Marker>
         );
       })}
-
-      {selectedMarker !== null && (() => {
-        const activity = activities.find(a => a.index === selectedMarker);
-        const location = geocodedLocations.get(selectedMarker);
-        if (!activity || !location) return null;
-
-        return (
-          <InfoWindow
-            position={location}
-            onCloseClick={() => setSelectedMarker(null)}
-          >
-            <div className="p-1 max-w-[200px]">
-              <p className="font-medium text-sm text-gray-900">{activity.item.title}</p>
-              {activity.item.location_area && (
-                <p className="text-xs text-gray-600 mt-0.5">{activity.item.location_area}</p>
-              )}
-              {activity.item.maps_query && (
-                <a
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activity.item.maps_query)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-600 hover:underline mt-1 inline-flex items-center gap-1"
-                >
-                  Open in Maps <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </div>
-          </InfoWindow>
-        );
-      })()}
-    </GoogleMap>
+    </MapContainer>
   );
 }
 
 export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
   function TripMap({ day, selectedActivityIndex, onPinClick, className, destination }, ref) {
-    const [apiKey, setApiKey] = useState<string | null>(null);
-    const [loadingKey, setLoadingKey] = useState(true);
-    const [keyError, setKeyError] = useState(false);
-
-    // Fetch Google Maps API key once
-    useEffect(() => {
-      const fetchApiKey = async () => {
-        try {
-          const { data, error } = await supabase.functions.invoke('get-maps-key');
-          if (!error && data?.apiKey) {
-            setApiKey(data.apiKey);
-          } else {
-            setKeyError(true);
-          }
-        } catch (e) {
-          console.error('Failed to fetch maps key:', e);
-          setKeyError(true);
-        } finally {
-          setLoadingKey(false);
-        }
-      };
-      fetchApiKey();
-    }, []);
-
-    // Loading API key state
-    if (loadingKey) {
-      return (
-        <div 
-          ref={ref}
-          className={cn(
-            'relative rounded-xl overflow-hidden',
-            'bg-card/60 backdrop-blur-sm border border-border/50',
-            'flex items-center justify-center',
-            className
-          )}
-        >
-          <div className="text-center p-8">
-            <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">Loading map...</p>
-          </div>
-        </div>
-      );
-    }
-
-    // No API key or error state
-    if (!apiKey || keyError) {
-      return (
-        <div 
-          ref={ref}
-          className={cn(
-            'relative rounded-xl overflow-hidden',
-            'bg-card/60 backdrop-blur-sm border border-border/50',
-            'flex items-center justify-center',
-            className
-          )}
-        >
-          <div className="text-center p-8">
-            <MapPin className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">Map not available</p>
-          </div>
-        </div>
-      );
-    }
-
     // No day selected
     if (!day || day.items.length === 0) {
       return (
@@ -341,8 +275,7 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
         style={{ isolation: 'isolate' }}
       >
         <div className="absolute inset-0">
-          <GoogleMapContent
-            apiKey={apiKey}
+          <LeafletMapContent
             day={day}
             selectedActivityIndex={selectedActivityIndex}
             onPinClick={onPinClick}
@@ -351,13 +284,13 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
         </div>
 
         {/* Day label */}
-        <div className="absolute top-3 left-3 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-card/95 backdrop-blur-md border border-border shadow-lg z-20">
+        <div className="absolute top-3 left-3 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-card/95 backdrop-blur-md border border-border shadow-lg z-[1000]">
           <Navigation className="w-3.5 h-3.5 text-primary" />
           <span className="text-xs font-medium">Day {day.day}</span>
         </div>
 
         {/* Legend */}
-        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap justify-center gap-1.5 z-20">
+        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap justify-center gap-1.5 z-[1000]">
           {Object.entries(timeBlockPinColors).map(([block, color]) => (
             <div 
               key={block}
