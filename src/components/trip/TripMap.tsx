@@ -1,5 +1,4 @@
-import { useState, useEffect, forwardRef, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { useState, useEffect, forwardRef, useRef, useMemo, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { ItineraryDay, ItineraryItem } from '@/lib/itinerary-adapter';
@@ -58,24 +57,7 @@ interface Activity {
   block: string;
 }
 
-// Component to fit bounds when locations change
-function FitBounds({ locations }: { locations: Map<number, GeocodedLocation> }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (locations.size === 0) return;
-
-    const bounds = L.latLngBounds(
-      Array.from(locations.values()).map(loc => [loc.lat, loc.lng] as [number, number])
-    );
-    
-    map.fitBounds(bounds, { padding: [50, 50] });
-  }, [map, locations]);
-
-  return null;
-}
-
-function LeafletMapContent({
+function LeafletMap({
   day,
   selectedActivityIndex,
   onPinClick,
@@ -86,6 +68,9 @@ function LeafletMapContent({
   onPinClick: (activityIndex: number) => void;
   destination?: string;
 }) {
+  const mapRef = useRef<L.Map | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const markersRef = useRef<L.Marker[]>([]);
   const [geocodedLocations, setGeocodedLocations] = useState<Map<number, GeocodedLocation>>(new Map());
   const [loading, setLoading] = useState(true);
 
@@ -107,7 +92,31 @@ function LeafletMapContent({
     return result;
   }, [day]);
 
-  // Geocode locations using Nominatim (free, no API key)
+  // Initialize map
+  useEffect(() => {
+    if (!mapContainerRef.current || mapRef.current) return;
+
+    mapRef.current = L.map(mapContainerRef.current, {
+      center: [20.5937, 78.9629], // Default to India
+      zoom: 5,
+      zoomControl: true,
+    });
+
+    // Dark theme tile layer
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(mapRef.current);
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
+
+  // Geocode locations
   useEffect(() => {
     if (activities.length === 0) {
       setLoading(false);
@@ -157,20 +166,81 @@ function LeafletMapContent({
     geocodeLocations();
   }, [activities, destination]);
 
-  // Calculate center from locations or use default
-  const center = useMemo(() => {
-    if (geocodedLocations.size > 0) {
-      const locs = Array.from(geocodedLocations.values());
-      const avgLat = locs.reduce((sum, loc) => sum + loc.lat, 0) / locs.length;
-      const avgLng = locs.reduce((sum, loc) => sum + loc.lng, 0) / locs.length;
-      return [avgLat, avgLng] as [number, number];
+  // Update markers when locations change
+  useEffect(() => {
+    if (!mapRef.current || geocodedLocations.size === 0) return;
+
+    // Clear existing markers
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current = [];
+
+    // Add new markers
+    const bounds = L.latLngBounds([]);
+
+    activities.forEach((activity, idx) => {
+      const location = geocodedLocations.get(activity.index);
+      if (!location) return;
+
+      const color = timeBlockPinColors[activity.block as keyof typeof timeBlockPinColors] || timeBlockPinColors.morning;
+      const isSelected = selectedActivityIndex === activity.index;
+
+      const marker = L.marker([location.lat, location.lng], {
+        icon: createMarkerIcon(color, String(idx + 1), isSelected),
+      }).addTo(mapRef.current!);
+
+      // Add popup
+      const popupContent = `
+        <div class="p-2 max-w-[200px]">
+          <p class="font-medium text-sm text-gray-900">${activity.item.title}</p>
+          ${activity.item.location_area ? `<p class="text-xs text-gray-600 mt-0.5">${activity.item.location_area}</p>` : ''}
+          ${activity.item.maps_query ? `
+            <a
+              href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activity.item.maps_query)}"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-xs text-blue-600 hover:underline mt-1 inline-flex items-center gap-1"
+            >
+              Open in Google Maps
+            </a>
+          ` : ''}
+        </div>
+      `;
+      marker.bindPopup(popupContent);
+
+      marker.on('click', () => {
+        onPinClick(activity.index);
+      });
+
+      markersRef.current.push(marker);
+      bounds.extend([location.lat, location.lng]);
+    });
+
+    // Fit bounds if we have locations
+    if (bounds.isValid()) {
+      mapRef.current.fitBounds(bounds, { padding: [50, 50] });
     }
-    return [20.5937, 78.9629] as [number, number]; // Default to India center
-  }, [geocodedLocations]);
+  }, [geocodedLocations, activities, selectedActivityIndex, onPinClick]);
+
+  // Update selected marker styling
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    activities.forEach((activity, idx) => {
+      const location = geocodedLocations.get(activity.index);
+      if (!location) return;
+
+      const marker = markersRef.current[idx];
+      if (marker) {
+        const color = timeBlockPinColors[activity.block as keyof typeof timeBlockPinColors] || timeBlockPinColors.morning;
+        const isSelected = selectedActivityIndex === activity.index;
+        marker.setIcon(createMarkerIcon(color, String(idx + 1), isSelected));
+      }
+    });
+  }, [selectedActivityIndex, activities, geocodedLocations]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full bg-card">
+      <div className="flex items-center justify-center h-full bg-card min-h-[300px]">
         <div className="text-center">
           <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-2" />
           <p className="text-sm text-muted-foreground">Loading locations...</p>
@@ -181,7 +251,7 @@ function LeafletMapContent({
 
   if (geocodedLocations.size === 0) {
     return (
-      <div className="flex items-center justify-center h-full bg-card">
+      <div className="flex items-center justify-center h-full bg-card min-h-[300px]">
         <div className="text-center p-8">
           <MapPin className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
           <p className="text-sm text-muted-foreground">No locations found</p>
@@ -191,58 +261,11 @@ function LeafletMapContent({
   }
 
   return (
-    <MapContainer
-      center={center}
-      zoom={12}
-      style={{ width: '100%', height: '100%', minHeight: '300px' }}
-      zoomControl={true}
-      scrollWheelZoom={true}
-    >
-      <TileLayer
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-      />
-      
-      <FitBounds locations={geocodedLocations} />
-
-      {activities.map((activity, idx) => {
-        const location = geocodedLocations.get(activity.index);
-        if (!location) return null;
-
-        const color = timeBlockPinColors[activity.block as keyof typeof timeBlockPinColors] || timeBlockPinColors.morning;
-        const isSelected = selectedActivityIndex === activity.index;
-
-        return (
-          <Marker
-            key={activity.index}
-            position={[location.lat, location.lng]}
-            icon={createMarkerIcon(color, String(idx + 1), isSelected)}
-            eventHandlers={{
-              click: () => onPinClick(activity.index),
-            }}
-          >
-            <Popup>
-              <div className="p-1 max-w-[200px]">
-                <p className="font-medium text-sm text-gray-900">{activity.item.title}</p>
-                {activity.item.location_area && (
-                  <p className="text-xs text-gray-600 mt-0.5">{activity.item.location_area}</p>
-                )}
-                {activity.item.maps_query && (
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activity.item.maps_query)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-blue-600 hover:underline mt-1 inline-flex items-center gap-1"
-                  >
-                    Open in Google Maps <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-              </div>
-            </Popup>
-          </Marker>
-        );
-      })}
-    </MapContainer>
+    <div 
+      ref={mapContainerRef} 
+      className="w-full h-full min-h-[300px]"
+      style={{ background: '#1a1a2e' }}
+    />
   );
 }
 
@@ -282,7 +305,7 @@ export const TripMap = forwardRef<HTMLDivElement, TripMapProps>(
         style={{ isolation: 'isolate' }}
       >
         <div className="absolute inset-0">
-          <LeafletMapContent
+          <LeafletMap
             day={day}
             selectedActivityIndex={selectedActivityIndex}
             onPinClick={onPinClick}
