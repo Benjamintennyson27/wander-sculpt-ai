@@ -1038,6 +1038,10 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: undefined
       }
+      is_trip_collaborator: {
+        Args: { p_trip_id: string; p_user_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       app_role: "user" | "admin"
