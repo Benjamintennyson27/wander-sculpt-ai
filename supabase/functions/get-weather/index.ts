@@ -57,16 +57,35 @@ serve(async (req) => {
       const geoResponse = await fetch(geoUrl);
       const geoData = await geoResponse.json();
       
-      if (!geoData || geoData.length === 0) {
+      // Check if geocoding returned valid results
+      if (!geoData || !Array.isArray(geoData) || geoData.length === 0) {
         console.error('Could not geocode destination:', destination);
+        // Return 200 with error in body so frontend handles it gracefully
         return new Response(
-          JSON.stringify({ error: 'Could not find location' }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ 
+            error: 'Could not find location', 
+            weather: [],
+            location: { name: destination }
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
       
-      latitude = geoData[0].lat;
-      longitude = geoData[0].lon;
+      const firstResult = geoData[0];
+      if (!firstResult || typeof firstResult.lat !== 'number' || typeof firstResult.lon !== 'number') {
+        console.error('Invalid geocoding result for:', destination);
+        return new Response(
+          JSON.stringify({ 
+            error: 'Invalid location data', 
+            weather: [],
+            location: { name: destination }
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      latitude = firstResult.lat;
+      longitude = firstResult.lon;
       console.log(`Geocoded ${destination} to: ${latitude}, ${longitude}`);
     }
 
