@@ -65,7 +65,7 @@ serve(async (req) => {
           { role: "system", content: SYSTEM_PROMPT },
           ...messages,
         ],
-        stream: true,
+        stream: false, // Oxlo API doesn't support streaming yet
       }),
     });
 
@@ -90,9 +90,13 @@ serve(async (req) => {
       );
     }
 
-    return new Response(response.body, {
-      headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
-    });
+    const data = await response.json();
+    const assistantMessage = data.choices?.[0]?.message?.content || "I couldn't generate a response.";
+
+    return new Response(
+      JSON.stringify({ message: assistantMessage }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (error) {
     console.error("Travel assistant error:", error);
     return new Response(
