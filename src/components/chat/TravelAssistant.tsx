@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Trash2, X, Loader2 } from "lucide-react";
+import { Send, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ChatMessage } from "./ChatMessage";
+import { TypingIndicator } from "./TypingIndicator";
 import { useTravelChat } from "@/hooks/useTravelChat";
 
 const QUICK_PROMPTS = [
@@ -114,10 +115,7 @@ export function TravelAssistant({ onClose }: TravelAssistantProps) {
               />
             ))}
             {isLoading && messages[messages.length - 1]?.role === "user" && (
-              <div className="flex items-center gap-2 text-muted-foreground p-3">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span className="text-sm">Thinking...</span>
-              </div>
+              <TypingIndicator />
             )}
           </div>
         )}
