@@ -60,7 +60,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "meta-llama/Llama-3.1-8B-Instruct",
+        model: "llama-3.1-8b",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           ...messages,
