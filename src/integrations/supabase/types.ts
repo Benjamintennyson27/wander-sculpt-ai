@@ -611,6 +611,50 @@ export type Database = {
           },
         ]
       }
+      trip_collaborators: {
+        Row: {
+          accepted_at: string | null
+          email: string
+          id: string
+          invited_at: string
+          invited_by: string
+          role: string
+          status: string
+          trip_id: string
+          user_id: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          email: string
+          id?: string
+          invited_at?: string
+          invited_by: string
+          role?: string
+          status?: string
+          trip_id: string
+          user_id: string
+        }
+        Update: {
+          accepted_at?: string | null
+          email?: string
+          id?: string
+          invited_at?: string
+          invited_by?: string
+          role?: string
+          status?: string
+          trip_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_collaborators_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trip_messages: {
         Row: {
           content: string
@@ -677,6 +721,50 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "trip_places_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trip_reminders: {
+        Row: {
+          created_at: string
+          days_before: number
+          email: string
+          id: string
+          reminder_type: string
+          scheduled_for: string
+          sent_at: string | null
+          trip_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          days_before?: number
+          email: string
+          id?: string
+          reminder_type?: string
+          scheduled_for: string
+          sent_at?: string | null
+          trip_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          days_before?: number
+          email?: string
+          id?: string
+          reminder_type?: string
+          scheduled_for?: string
+          sent_at?: string | null
+          trip_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trip_reminders_trip_id_fkey"
             columns: ["trip_id"]
             isOneToOne: false
             referencedRelation: "trips"
@@ -949,6 +1037,10 @@ export type Database = {
       increment_period_generations: {
         Args: { p_user_id: string }
         Returns: undefined
+      }
+      is_trip_collaborator: {
+        Args: { p_trip_id: string; p_user_id: string }
+        Returns: boolean
       }
     }
     Enums: {

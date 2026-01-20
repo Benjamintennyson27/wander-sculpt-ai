@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { Skeleton } from "@/components/ui/skeleton";
+import { FloatingChatButton } from "@/components/chat/FloatingChatButton";
 
 // Eager load critical routes
 import Index from "./pages/Index";
@@ -102,6 +103,7 @@ const App = () => (
               )}
               <Route path="*" element={<NotFound />} />
             </Routes>
+            <FloatingChatButton />
           </Suspense>
         </BrowserRouter>
       </TooltipProvider>
