@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Plane, Mail, Lock, User, ArrowRight, Loader2 } from 'lucide-react';
+import { Plane, Mail, Lock, User, ArrowRight, Loader2, CheckCircle2 } from 'lucide-react';
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -13,6 +13,7 @@ export default function Auth() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showVerificationMessage, setShowVerificationMessage] = useState(false);
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -52,17 +53,63 @@ export default function Auth() {
             description: error.message
           });
         } else {
-          toast({
-            title: 'Account created!',
-            description: 'Welcome to TripTailor AI'
-          });
-          navigate('/app');
+          setShowVerificationMessage(true);
         }
       }
     } finally {
       setLoading(false);
     }
   };
+
+  // Show verification message after signup
+  if (showVerificationMessage) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md space-y-8">
+          <div className="text-center animate-fade-in">
+            <Link to="/" className="inline-flex items-center gap-3 mb-8">
+              <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20">
+                <Plane className="w-6 h-6 text-primary" />
+              </div>
+              <span className="text-2xl font-display font-semibold">TripTailor</span>
+            </Link>
+          </div>
+
+          <div className="glass-card p-8 text-center animate-slide-up">
+            <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center mx-auto mb-6">
+              <CheckCircle2 className="w-8 h-8 text-emerald-500" />
+            </div>
+            
+            <h1 className="text-2xl font-display font-semibold mb-2">
+              Check your email
+            </h1>
+            <p className="text-muted-foreground mb-6">
+              We've sent a verification link to <span className="font-medium text-foreground">{email}</span>. 
+              Please click the link to verify your account.
+            </p>
+
+            <div className="space-y-3">
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  setShowVerificationMessage(false);
+                  setIsLogin(true);
+                }}
+              >
+                <ArrowRight className="w-4 h-4 mr-2" />
+                Back to Sign In
+              </Button>
+            </div>
+
+            <p className="text-xs text-muted-foreground mt-6">
+              Didn't receive the email? Check your spam folder or try signing up again.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12">
