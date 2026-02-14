@@ -1,50 +1,38 @@
 
 
-## Plan: Make Abhishekrajawat1808@gmail.com Admin & Disable Email Verification
+## Replace Destination Photo Gallery with Trip Countdown + Quick Stats
 
-This plan will make the specified email an admin with unlimited generations and remove email verification for all new signups.
+Remove the photo gallery section and replace it with a comprehensive Trip Countdown and Quick Stats dashboard that shows useful trip metrics at a glance.
 
----
+### What You'll Get
 
-### What Will Change
-
-#### 1. Disable Email Verification (Backend Auth Setting)
-- Enable "auto-confirm" for email signups so new users can sign in immediately without verifying their email
-- This is a backend configuration change
-
-#### 2. Update Sign Up Flow (Frontend)
-- Remove the "Check your email" verification screen that appears after signup
-- Instead, automatically sign in and redirect users to the dashboard after signup
-- Update the `Auth.tsx` page to handle immediate login after registration
-
-#### 3. Grant Admin Role to Abhishekrajawat1808@gmail.com
-- **Note**: This email doesn't exist in the database yet
-- Once you register with this email (after the changes above), I'll add the admin role to the `user_roles` table
-- Admins get unlimited trip generations as per your existing quota system
-
----
+A stats panel replacing the photo gallery that includes:
+- **Trip Countdown** - using the existing `TripCountdown` component logic (days away, ongoing, completed)
+- **Quick Stats Cards** - total activities, trip duration, total days, budget utilization
+- **Budget Progress Bar** - visual indicator of estimated spend vs. budget
+- **Category Breakdown** - food vs. activities cost split
+- **Average Daily Cost** - per-day spending estimate
+- **Verified Places Count** - how many places have been verified
 
 ### Technical Details
 
-**Files to modify:**
-- `src/pages/Auth.tsx` - Remove verification message screen, auto-redirect after signup
-- `src/contexts/AuthContext.tsx` - Update signUp to handle auto-confirm flow
+**1. Create `src/components/trip/TripQuickStats.tsx`**
+- New component accepting `trip`, `itinerary`, and `budgetSummary` props
+- Reuses existing `TripCountdown` for the countdown badge
+- Uses existing `Progress` bar, `Card`, and `Badge` UI components
+- Calculates stats from itinerary data (total activities, verified count, food items)
+- Displays budget progress using `formatCurrency` from `budget-calculator.ts`
+- Responsive card grid layout matching the existing design language
 
-**Backend changes:**
-- Configure auth to auto-confirm email signups
-- SQL to add admin role (after registration):
-```sql
-INSERT INTO user_roles (user_id, role)
-SELECT id, 'admin'::app_role 
-FROM profiles 
-WHERE LOWER(email) = LOWER('Abhishekrajawat1808@gmail.com');
-```
+**2. Update `src/pages/TripDetail.tsx`**
+- Remove `DestinationGallery` import and all references
+- Import `TripQuickStats` component and `TripCountdown`
+- Replace desktop sidebar (line 629-634): swap `DestinationGallery` for `TripQuickStats`
+- Replace mobile overlay (line 842-870): swap gallery overlay for quick stats overlay
+- Update mobile toggle button: change icon from `Camera` to `BarChart3` and label from "Photos" to "Stats"
+- Pass `trip`, `currentItinerary`, and `budgetSummary` as props
 
----
-
-### After Implementation
-
-1. New users can sign up and immediately start using the app (no email verification)
-2. You'll register with `Abhishekrajawat1808@gmail.com`
-3. I'll then add the admin role giving you unlimited generations
+**3. Optionally clean up `src/components/trip/DestinationGallery.tsx`**
+- File can be deleted since it will no longer be used
+- The `unsplash-photos` edge function can remain for potential future use
 
