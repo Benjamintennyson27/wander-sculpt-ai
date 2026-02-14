@@ -11,7 +11,7 @@ import {
   Calendar, Clock, Utensils, Lightbulb, AlertTriangle,
   Loader2, ChevronDown, ChevronUp, Users, IndianRupee,
   Share2, Copy, Link as LinkIcon, Wallet, X, BadgeCheck,
-  Sparkles, Briefcase, ThermometerSun, Camera
+  Sparkles, Briefcase, ThermometerSun, BarChart3
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { 
@@ -20,7 +20,7 @@ import {
 } from '@/lib/itinerary-adapter';
 import { calculateBudget, formatCurrency, BudgetSummary } from '@/lib/budget-calculator';
 import { TimelineDay } from '@/components/trip/TimelineDay';
-import { DestinationGallery } from '@/components/trip/DestinationGallery';
+import { TripQuickStats } from '@/components/trip/TripQuickStats';
 import { CopilotDrawer } from '@/components/trip/CopilotDrawer';
 import { ReplaceActivityModal } from '@/components/trip/ReplaceActivityModal';
 import { ExportCalendar } from '@/components/trip/ExportCalendar';
@@ -408,8 +408,8 @@ export default function TripDetail() {
               onClick={() => setShowMobileMap(true)}
               className="lg:hidden"
             >
-              <Camera className="w-4 h-4 mr-2" />
-              Photos
+              <BarChart3 className="w-4 h-4 mr-2" />
+              Stats
             </Button>
             
             <Button
@@ -626,10 +626,10 @@ export default function TripDetail() {
                         </div>
                       </div>
 
-                      {/* Destination Gallery - Desktop */}
+                      {/* Quick Stats - Desktop */}
                       <div className="hidden lg:block lg:col-span-2">
                         <div className="sticky top-24">
-                          <DestinationGallery destination={trip.destination} />
+                          <TripQuickStats trip={trip} itinerary={currentItinerary || null} budgetSummary={budgetSummary} />
                         </div>
                       </div>
                     </div>
@@ -839,7 +839,7 @@ export default function TripDetail() {
         )}
       </main>
 
-      {/* Mobile Gallery Overlay */}
+      {/* Mobile Stats Overlay */}
       {showMobileMap && (
         <div className="fixed inset-0 z-[100] lg:hidden">
           <div 
@@ -853,7 +853,7 @@ export default function TripDetail() {
             <div className="px-4 pb-4 flex flex-col flex-1 overflow-hidden overflow-y-auto">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-display font-semibold text-lg">
-                  {trip.destination} Photos
+                  Trip Stats
                 </h3>
                 <Button
                   variant="ghost"
@@ -864,7 +864,7 @@ export default function TripDetail() {
                   <X className="w-5 h-5" />
                 </Button>
               </div>
-              <DestinationGallery destination={trip.destination} />
+              <TripQuickStats trip={trip} itinerary={currentItinerary || null} budgetSummary={budgetSummary} />
             </div>
           </div>
         </div>
