@@ -10,8 +10,8 @@ import {
   ArrowLeft, Star, RefreshCw, Check, MapPin, 
   Calendar, Clock, Utensils, Lightbulb, AlertTriangle,
   Loader2, ChevronDown, ChevronUp, Users, IndianRupee,
-  Share2, Copy, Link as LinkIcon, Wallet, Map as MapIcon, X, BadgeCheck,
-  Sparkles, Briefcase, ThermometerSun
+  Share2, Copy, Link as LinkIcon, Wallet, X, BadgeCheck,
+  Sparkles, Briefcase, ThermometerSun, Camera
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { 
@@ -20,7 +20,7 @@ import {
 } from '@/lib/itinerary-adapter';
 import { calculateBudget, formatCurrency, BudgetSummary } from '@/lib/budget-calculator';
 import { TimelineDay } from '@/components/trip/TimelineDay';
-import { TripMap } from '@/components/trip/TripMap';
+import { DestinationGallery } from '@/components/trip/DestinationGallery';
 import { CopilotDrawer } from '@/components/trip/CopilotDrawer';
 import { ReplaceActivityModal } from '@/components/trip/ReplaceActivityModal';
 import { ExportCalendar } from '@/components/trip/ExportCalendar';
@@ -408,8 +408,8 @@ export default function TripDetail() {
               onClick={() => setShowMobileMap(true)}
               className="lg:hidden"
             >
-              <MapIcon className="w-4 h-4 mr-2" />
-              Show Map
+              <Camera className="w-4 h-4 mr-2" />
+              Photos
             </Button>
             
             <Button
@@ -626,22 +626,10 @@ export default function TripDetail() {
                         </div>
                       </div>
 
-                      {/* Map Section - Desktop */}
+                      {/* Destination Gallery - Desktop */}
                       <div className="hidden lg:block lg:col-span-2">
-                        <div className="sticky top-24 space-y-4">
-                          <h3 className="text-lg font-display font-semibold flex items-center gap-2">
-                            <MapIcon className="w-5 h-5 text-primary" />
-                            Day {selectedDay?.day || 1} Map
-                          </h3>
-                          <div className="aspect-[4/3] min-h-[400px] max-h-[600px]">
-                            <TripMap
-                              day={selectedDay}
-                              selectedActivityIndex={selectedActivityIndex}
-                              onPinClick={handlePinClick}
-                              destination={trip.destination}
-                              className="h-full w-full"
-                            />
-                          </div>
+                        <div className="sticky top-24">
+                          <DestinationGallery destination={trip.destination} />
                         </div>
                       </div>
                     </div>
@@ -851,26 +839,21 @@ export default function TripDetail() {
         )}
       </main>
 
-      {/* Mobile Map Overlay */}
+      {/* Mobile Gallery Overlay */}
       {showMobileMap && (
         <div className="fixed inset-0 z-[100] lg:hidden">
-          {/* Backdrop */}
           <div 
             className="absolute inset-0 bg-background/90 backdrop-blur-md"
             onClick={() => setShowMobileMap(false)}
           />
-          
-          {/* Sheet */}
           <div className="absolute bottom-0 left-0 right-0 bg-card border-t border-border rounded-t-2xl animate-slide-up shadow-2xl max-h-[85vh] flex flex-col">
-            {/* Handle bar */}
             <div className="flex justify-center pt-3 pb-1">
               <div className="w-12 h-1.5 rounded-full bg-muted-foreground/30" />
             </div>
-            
-            <div className="px-4 pb-4 flex flex-col flex-1 overflow-hidden">
+            <div className="px-4 pb-4 flex flex-col flex-1 overflow-hidden overflow-y-auto">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-display font-semibold text-lg">
-                  Day {selectedDay?.day || 1} Map
+                  {trip.destination} Photos
                 </h3>
                 <Button
                   variant="ghost"
@@ -881,19 +864,7 @@ export default function TripDetail() {
                   <X className="w-5 h-5" />
                 </Button>
               </div>
-              
-              <div className="flex-1 min-h-0">
-                <TripMap
-                  day={selectedDay}
-                  selectedActivityIndex={selectedActivityIndex}
-                  onPinClick={(idx) => {
-                    handlePinClick(idx);
-                    setShowMobileMap(false);
-                  }}
-                  destination={trip.destination}
-                  className="h-full min-h-[350px] max-h-[60vh]"
-                />
-              </div>
+              <DestinationGallery destination={trip.destination} />
             </div>
           </div>
         </div>
