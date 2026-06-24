@@ -3,23 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- TODO: Set the document title to the name of your application -->
-    <title>Trip Tailor</title>
-    <meta name="description" content="Lovable Generated Project" />
-    <meta name="author" content="Lovable" />
 
-    <!-- TODO: Update og:title to match your application name -->
-    
-    <meta property="og:description" content="Lovable Generated Project" />
+    <!-- Security headers (meta-tag subset; HTTP headers via hosting are stronger) -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://maps.googleapis.com https://maps.gstatic.com https://js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https: wss:; frame-src https://challenges.cloudflare.com https://js.stripe.com https://hooks.stripe.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self';" />
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta http-equiv="Permissions-Policy" content="geolocation=(self), camera=(), microphone=(), payment=(self)" />
+
+    <title>TripTailor — AI-powered travel itineraries tailored to you</title>
+    <meta name="description" content="TripTailor uses AI to design personalized day-by-day travel itineraries with verified places, real budgets in INR, and built-in maps, weather and packing lists." />
+    <meta name="author" content="TripTailor" />
+    <meta name="theme-color" content="#0F172A" />
+    <link rel="canonical" href="https://wander-sculpt-ai.lovable.app/" />
+
+    <meta property="og:title" content="TripTailor — AI-powered travel itineraries tailored to you" />
+    <meta property="og:description" content="Personalized day-by-day travel plans with verified places, real INR budgets, maps, weather and packing lists." />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://wander-sculpt-ai.lovable.app/" />
     <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@Lovable" />
+    <meta name="twitter:title" content="TripTailor — AI-powered travel itineraries tailored to you" />
+    <meta name="twitter:description" content="Personalized day-by-day travel plans with verified places, real INR budgets, maps, weather and packing lists." />
     <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
-    <meta property="og:title" content="Trip Tailor">
-  <meta name="twitter:title" content="Trip Tailor">
-</head>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "TripTailor",
+        "url": "https://wander-sculpt-ai.lovable.app/",
+        "description": "AI-powered travel itinerary planner with verified places, real budgets, maps, weather and packing lists."
+      }
+    </script>
+  </head>
 
   <body>
     <div id="root"></div>

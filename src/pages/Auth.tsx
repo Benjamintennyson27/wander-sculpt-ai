@@ -52,13 +52,13 @@ export default function Auth() {
             description: error.message
           });
         } else {
-          // Auto-confirm is enabled, so user is immediately logged in
-          // Wait a moment for the auth state to update, then redirect
+          // Email verification is required — user must confirm before signing in.
           toast({
-            title: 'Account created!',
-            description: 'Welcome to TripTailor'
+            title: 'Check your email',
+            description: 'We sent a verification link to ' + email + '. Click it to activate your account, then sign in.',
           });
-          navigate('/app');
+          setIsLogin(true);
+          setPassword('');
         }
       }
     } finally {
